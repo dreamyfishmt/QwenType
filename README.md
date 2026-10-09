@@ -4,8 +4,6 @@
 
 Hold Right Ctrl, speak, release — local Qwen3-ASR voice typing for Windows.
 
-![QwenType demo](docs/demo.gif)
-
 QwenType is a tray-only app for Windows 10/11. While you hold **Right Ctrl**, it streams your microphone to a
 [Qwen3-ASR server](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm) on your PC or your own server and
 shows the live transcript in a small capsule at the bottom of the screen. When you release the key, the text is typed
@@ -45,23 +43,32 @@ This is the short version of the server's [Quick start: GPU](https://github.com/
 Prerequisites: an NVIDIA GPU with driver R580 or newer, Docker Desktop with the WSL 2 backend, and
 [uv](https://docs.astral.sh/uv/) (for `uvx`).
 
-1. Download the model (~2.7 GB, pinned to the tested revision):
+1. Download the model (~2.25 GB):
 
    ```powershell
-   uvx --from huggingface_hub hf download dreamyfishmt/qwen3-asr-1.7b-onnx --revision f4a19c9705b87ea06685b1ffddd95772ffbde1b0 --local-dir D:/models/qwen3-asr-1.7b-onnx
+   uvx --from huggingface_hub hf download dreamyfishmt/qwen3-asr-1.7b-onnx --local-dir D:/models/qwen3-asr-1.7b-onnx
    ```
 
-   [`dreamyfishmt/qwen3-asr-1.7b-onnx`](https://huggingface.co/dreamyfishmt/qwen3-asr-1.7b-onnx) repackages, unmodified,
-   the files of `andrewleech/qwen3-asr-1.7b-onnx` (encoder, embeddings, tokenizer) and `sorryhyun/qwen3-asr-onnx-gqa`
-   (decoder); its model card lists the exact source revisions.
+   [`dreamyfishmt/qwen3-asr-1.7b-onnx`](https://huggingface.co/dreamyfishmt/qwen3-asr-1.7b-onnx) repackages the embeddings and tokenizer of
+   `andrewleech/qwen3-asr-1.7b-onnx` and the int4 decoder of `sorryhyun/qwen3-asr-onnx-gqa` as published. The encoder
+   `encoder.fp16.onnx` is an FP16 conversion of andrewleech's FP32 `encoder.onnx`. See the
+   [model card](https://huggingface.co/dreamyfishmt/qwen3-asr-1.7b-onnx) for source revisions and validation.
 
    If the download fails with a 401 from `cas-server.xethub.hf.co` (some proxies block Hugging Face's Xet storage),
    set `$env:HF_HUB_DISABLE_XET = "1"` and run it again.
 
 2. Get [`compose.gpu.yaml`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/compose.gpu.yaml)
    and [`.env.gpu.example`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/.env.gpu.example)
-   from the server repository, copy `.env.gpu.example` to `.env` and set `MODEL_DIR=D:/models`. You can also
-   `git clone` the server repository instead, which also has the download script and test samples; see
+   from the server repository. Without cloning it, run these two commands in an empty folder (in PowerShell, use
+   `curl.exe`, not `curl`):
+
+   ```powershell
+   curl.exe -LO https://raw.githubusercontent.com/dreamyfishmt/fast-qwen-asr-inference-vllm/main/compose.gpu.yaml
+   curl.exe -L -o .env https://raw.githubusercontent.com/dreamyfishmt/fast-qwen-asr-inference-vllm/main/.env.gpu.example
+   ```
+
+   This already creates `.env`; just set `MODEL_DIR=D:/models` in it. You can also `git clone` the server repository
+   instead, which also has the download script and test samples (then copy `.env.gpu.example` to `.env`); see
    [Quick start: GPU](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#quick-start-gpu-onnx-runtime).
 
 3. Start it (this pulls the image from GHCR) and wait for `provider cuda`, then `Server is ready` in the log:

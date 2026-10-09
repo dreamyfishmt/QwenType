@@ -4,8 +4,6 @@
 
 按住右 Ctrl 说话，松开即出字，本地运行的 Qwen3-ASR Windows 语音输入。
 
-![QwenType 演示](docs/demo.gif)
-
 QwenType 是一个只驻留在系统托盘的 Windows 10/11 应用。按住**右 Ctrl** 时，它把麦克风音频实时发送到本机或你自己服务器上的
 [Qwen3-ASR 服务](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm)，并在屏幕底部的小胶囊窗口里显示实时识别结果。
 松开按键后，文字会输入到当前焦点所在的应用。用到右 Ctrl 的快捷键（Ctrl+C 等）照常可用，不会触发录音。
@@ -43,23 +41,31 @@ QwenType 只通过 WebSocket/HTTP 与服务通信，不负责管理 Docker。服
 前提条件：驱动版本 R580 或更新的 NVIDIA 显卡、使用 WSL 2 后端的 Docker Desktop，以及
 [uv](https://docs.astral.sh/uv/)（用于 `uvx`）。
 
-1. 下载模型（约 2.7 GB，固定为测试过的版本）：
+1. 下载模型（约 2.25 GB）：
 
    ```powershell
-   uvx --from huggingface_hub hf download dreamyfishmt/qwen3-asr-1.7b-onnx --revision f4a19c9705b87ea06685b1ffddd95772ffbde1b0 --local-dir D:/models/qwen3-asr-1.7b-onnx
+   uvx --from huggingface_hub hf download dreamyfishmt/qwen3-asr-1.7b-onnx --local-dir D:/models/qwen3-asr-1.7b-onnx
    ```
 
-   [`dreamyfishmt/qwen3-asr-1.7b-onnx`](https://huggingface.co/dreamyfishmt/qwen3-asr-1.7b-onnx) 原样打包了
-   `andrewleech/qwen3-asr-1.7b-onnx`（编码器、词嵌入、分词器）和 `sorryhyun/qwen3-asr-onnx-gqa`（解码器）的文件，未做修改；
-   具体的来源版本见其模型卡。
+   [`dreamyfishmt/qwen3-asr-1.7b-onnx`](https://huggingface.co/dreamyfishmt/qwen3-asr-1.7b-onnx) 原样打包了 `andrewleech/qwen3-asr-1.7b-onnx`
+   的词嵌入和分词器，以及 `sorryhyun/qwen3-asr-onnx-gqa` 的 int4 解码器。编码器 `encoder.fp16.onnx` 是从 andrewleech 的
+   FP32 `encoder.onnx` 转换来的 FP16 版本。来源版本和验证结果见[模型卡](https://huggingface.co/dreamyfishmt/qwen3-asr-1.7b-onnx)。
 
    如果下载时 `cas-server.xethub.hf.co` 返回 401（有些代理会拦截 Hugging Face 的 Xet 存储），
    设置 `$env:HF_HUB_DISABLE_XET = "1"` 后重试。
 
 2. 从服务仓库获取 [`compose.gpu.yaml`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/compose.gpu.yaml)
-   和 [`.env.gpu.example`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/.env.gpu.example)，
-   把 `.env.gpu.example` 复制为 `.env`，并设置 `MODEL_DIR=D:/models`。也可以直接 `git clone` 服务端仓库，
-   里面还有下载脚本和测试样本，参见 [Quick start: GPU](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#quick-start-gpu-onnx-runtime)。
+   和 [`.env.gpu.example`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/.env.gpu.example)。
+   不 clone 仓库的话，在一个空文件夹里运行下面两条命令（PowerShell 里要用 `curl.exe`，不要用 `curl`）：
+
+   ```powershell
+   curl.exe -LO https://raw.githubusercontent.com/dreamyfishmt/fast-qwen-asr-inference-vllm/main/compose.gpu.yaml
+   curl.exe -L -o .env https://raw.githubusercontent.com/dreamyfishmt/fast-qwen-asr-inference-vllm/main/.env.gpu.example
+   ```
+
+   这样已经生成了 `.env`，只需把其中的 `MODEL_DIR` 改成 `D:/models`。也可以 `git clone` 服务端仓库，
+   里面还有下载脚本和测试样本（这时需要把 `.env.gpu.example` 复制为 `.env`），参见
+   [Quick start: GPU](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#quick-start-gpu-onnx-runtime)。
 
 3. 启动（会从 GHCR 拉取镜像），等日志先出现 `provider cuda`，再出现 `Server is ready`：
 
