@@ -164,9 +164,10 @@ class AsrClientTest(unittest.TestCase):
         self.assertEqual(c.events[-1], ("error", "Unsupported language: xx"))
 
     def test_offline(self):
-        s, c = self._session(1)  # nothing listens on port 1
+        # Nothing listens on port 1. Windows retries refused connects for ~2 s.
+        s, c = self._session(1, ready_timeout=15.0)
         s.start()
-        self._wait(c)
+        self._wait(c, timeout=20.0)
         self.assertEqual(c.events[-1], ("error", "ASR server offline"))
 
     def test_final_timeout_falls_back_to_partial(self):
@@ -194,8 +195,8 @@ class AsrClientTest(unittest.TestCase):
         self.assertFalse([e for e in c.events if e[0] in ("final", "error")])
 
     def test_status_offline(self):
-        fut = self.runner.submit(fetch_status("http://127.0.0.1:1"))
-        self.assertEqual(fut.result(10), "offline")
+        fut = self.runner.submit(fetch_status("http://127.0.0.1:1", timeout=15.0))
+        self.assertEqual(fut.result(20), "offline")
 
 
 if __name__ == "__main__":

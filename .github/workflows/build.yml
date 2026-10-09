@@ -1,0 +1,74 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Windows exe
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run -m unittest discover -s tests -t . -v
+
+      - name: Build QwenType.exe
+        run: uv run pyinstaller --noconfirm --clean qwentype.spec
+
+      - name: Report size
+        run: |
+          $exe = Get-Item dist\QwenType.exe
+          "Built $($exe.FullName): {0:N1} MiB" -f ($exe.Length / 1MB)
+          "### QwenType.exe: {0:N1} MiB" -f ($exe.Length / 1MB) >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QwenType-${{ github.sha }}
+          path: dist/QwenType.exe
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: QwenType-${{ github.sha }}
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/QwenType.exe
+          generate_release_notes: true
