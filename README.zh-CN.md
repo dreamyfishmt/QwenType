@@ -38,25 +38,30 @@ QwenType 只通过 WebSocket/HTTP 与服务通信，不负责管理 Docker。服
 
 ### 本机 GPU（推荐）
 
-前提条件：驱动版本 R580 或更新的 NVIDIA 显卡，以及使用 WSL 2 后端的 Docker Desktop。
+这是服务端 [Quick start: GPU](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#quick-start-gpu-onnx-runtime) 的精简版。
 
-1. 下载模型（约 2.7 GB，固定为服务端测试过的版本）：
+前提条件：驱动版本 R580 或更新的 NVIDIA 显卡、使用 WSL 2 后端的 Docker Desktop，以及
+[uv](https://docs.astral.sh/uv/)（用于 `uvx`）。
+
+1. 下载模型（约 2.7 GB，固定为测试过的版本）：
 
    ```powershell
-   $D = "D:/models/qwen3-asr-1.7b-onnx"
-   uvx --from huggingface_hub hf download andrewleech/qwen3-asr-1.7b-onnx `
-     config.json tokenizer.json embed_tokens.bin encoder.onnx `
-     --revision df916193ac67e59347769891a21e10d81d12acdd --local-dir $D
-   uvx --from huggingface_hub hf download sorryhyun/qwen3-asr-onnx-gqa `
-     decoder-1.7b-fp16.onnx decoder-1.7b-fp16.onnx.data `
-     --revision 075249f70b56cdded1cf4b189cbdde0fb77aeec1 --local-dir $D
+   uvx --from huggingface_hub hf download dreamyfishmt/qwen3-asr-1.7b-onnx --revision f4a19c9705b87ea06685b1ffddd95772ffbde1b0 --local-dir D:/models/qwen3-asr-1.7b-onnx
    ```
+
+   [`dreamyfishmt/qwen3-asr-1.7b-onnx`](https://huggingface.co/dreamyfishmt/qwen3-asr-1.7b-onnx) 原样打包了
+   `andrewleech/qwen3-asr-1.7b-onnx`（编码器、词嵌入、分词器）和 `sorryhyun/qwen3-asr-onnx-gqa`（解码器）的文件，未做修改；
+   具体的来源版本见其模型卡。
+
+   如果下载时 `cas-server.xethub.hf.co` 返回 401（有些代理会拦截 Hugging Face 的 Xet 存储），
+   设置 `$env:HF_HUB_DISABLE_XET = "1"` 后重试。
 
 2. 从服务仓库获取 [`compose.gpu.yaml`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/compose.gpu.yaml)
    和 [`.env.gpu.example`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/.env.gpu.example)，
-   把 `.env.gpu.example` 复制为 `.env`，并设置 `MODEL_DIR=D:/models`。
+   把 `.env.gpu.example` 复制为 `.env`，并设置 `MODEL_DIR=D:/models`。也可以直接 `git clone` 服务端仓库，
+   里面还有下载脚本和测试样本，参见 [Quick start: GPU](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#quick-start-gpu-onnx-runtime)。
 
-3. 启动（会从 GHCR 拉取镜像），等日志出现 `Server is ready`：
+3. 启动（会从 GHCR 拉取镜像），等日志先出现 `provider cuda`，再出现 `Server is ready`：
 
    ```powershell
    docker compose -f compose.gpu.yaml up -d
@@ -68,7 +73,8 @@ QwenType 只通过 WebSocket/HTTP 与服务通信，不负责管理 Docker。服
 ### CPU 服务器（VPS）
 
 按服务端 README 的 [CPU deployment](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#cpu-deployment) 部署
-（`compose.cpu.yaml`、`.env.cpu.example`）。CPU 镜像**必须**设置 `API_TOKEN`（可用 `openssl rand -hex 32` 生成）。
+（`compose.cpu.yaml`、`.env.cpu.example`）。CPU 镜像**必须**设置 `API_TOKEN`
+（见 [Authentication](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#authentication)，可用 `openssl rand -hex 32` 生成）。
 配置域名并使用 `--profile tls` 时，Caddy 会自动提供 HTTPS。然后在 QwenType 的 **ASR Server…** 窗口中填写：
 
 - **WebSocket URL**：`wss://你的域名/transcribe-streaming`（经 Caddy 走 HTTPS，推荐），或
@@ -92,7 +98,7 @@ CPU 服务器只在每段话的前 20 秒发送实时中间结果，最终结果
 - **WebSocket URL**：默认 `ws://127.0.0.1:8907/transcribe-streaming`；服务在 HTTPS 后面时用 `wss://…`。
 - **API Token**：服务端的 `API_TOKEN`，以 `Authorization: Bearer <token>` 发送，用 Windows DPAPI 加密保存。
   服务端未设置 token 时留空。
-- **Hotwords**：可选的热词上下文，让识别更倾向于指定的人名和术语，例如 `Vocabulary: Kubernetes, QwenType, 张三`。
+- **Hotwords**：可选的热词上下文（即流式接口的 [`context`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#ws-transcribe-streaming)），让识别更倾向于指定的人名和术语，例如 `Vocabulary: Kubernetes, QwenType, 张三`。
   请保持简短，每次解码都会带上它。它也会作为首选写法提供给 LLM 纠错。
 
 **Test** 会检查 `GET /ready`，并用 `GET /health` 验证 token（`ws://` → `http://`，`wss://` → `https://`，主机和端口不变），
