@@ -124,6 +124,7 @@ class Controller(QObject):
         session.events.partial.connect(self._on_partial)
         session.events.final.connect(self._on_final)
         session.events.error.connect(self._on_asr_error)
+        session.events.audio_limit.connect(self._on_audio_limit)
         self._session = session
         session.start()  # connect now; audio is buffered until "ready"
         self.audio.start(session.send_audio)
@@ -290,11 +291,17 @@ class Controller(QObject):
             utterance = self._utterance
             coro = llm.refine(text, base_url=s.llm_base_url, api_key=s.llm_api_key, model=s.llm_model,
                               timeout=s.llm_timeout_seconds, selected_language=s.language,
-                              detected_language=language)
+                              detected_language=language, vocabulary=s.asr_context)
             run_async(self.runner, coro,
                       lambda result, error: self._on_refined(utterance, text, result, error))
         else:
             self._inject(text)
+
+    @Slot(float)
+    def _on_audio_limit(self, seconds: float) -> None:
+        # The server drops audio beyond STREAM_MAX_SEC: stop recording and tell the user.
+        if self._is_current() and self.state is State.RECORDING:
+            self._finish(notice=f"Server limit {seconds:g} s reached")
 
     @Slot(str)
     def _on_asr_error(self, message: str) -> None:

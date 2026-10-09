@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -16,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from . import llm
 from .aio import AsyncRunner
-from .asr.qwen3 import fetch_status
+from .asr.qwen3 import TOKEN_REJECTED, fetch_status
 from .qtasync import run_async
 from .settings import DEFAULT_WS_URL, Settings, http_base_from_ws, is_valid_ws_url
 
@@ -31,34 +30,61 @@ class AsrServerDialog(QDialog):
     def __init__(self, settings: Settings, runner: AsyncRunner) -> None:
         super().__init__(None)
         self.setWindowTitle("QwenType – ASR Server")
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(520)
         self._settings = settings
         self._runner = runner
 
         self.url = QLineEdit(settings.ws_url)
         self.url.setPlaceholderText(DEFAULT_WS_URL)
+        reset = QPushButton("Default")
+        reset.clicked.connect(lambda: self.url.setText(DEFAULT_WS_URL))
+        url_row = QHBoxLayout()
+        url_row.addWidget(self.url, 1)
+        url_row.addWidget(reset)
+
+        self.token = QLineEdit(settings.asr_token)
+        self.token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.token.setPlaceholderText("(none)")
+        self.token.setClearButtonEnabled(True)  # an empty field removes the stored token
+
+        self.context = QLineEdit(settings.asr_context)
+        self.context.setPlaceholderText("e.g. Vocabulary: Kubernetes, QwenType, 张三")
+        self.context.setClearButtonEnabled(True)
+
+        form = QFormLayout()
+        form.addRow("WebSocket URL", url_row)
+        form.addRow("API Token", self.token)
+        form.addRow("Hotwords", self.context)
+
+        note = QLabel("URL: ws://host:8907/transcribe-streaming, or wss://your-domain/transcribe-streaming "
+                      "for a server behind HTTPS. API Token: the server's API_TOKEN (required by the CPU image), "
+                      "encrypted with Windows DPAPI. Hotwords: short context that biases recognition toward "
+                      "names and terms; keep it short, it is part of every decode.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray")
+
         self.status = QLabel("")
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        test = QPushButton("Test")
-        test.clicked.connect(self._test)
-        reset = QPushButton("Default")
-        reset.clicked.connect(lambda: self.url.setText(DEFAULT_WS_URL))
 
-        row = QHBoxLayout()
-        row.addWidget(self.url, 1)
-        row.addWidget(reset)
-        row.addWidget(test)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
+        self.test_button = QPushButton("Test")
+        self.test_button.clicked.connect(self._test)
+        save = QPushButton("Save")
+        save.setDefault(True)
+        save.clicked.connect(self._save)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.test_button)
+        buttons.addStretch(1)
+        buttons.addWidget(save)
+        buttons.addWidget(cancel)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("WebSocket URL (WS /transcribe-streaming):"))
-        layout.addLayout(row)
+        layout.addLayout(form)
+        layout.addWidget(note)
         layout.addWidget(self.status)
-        layout.addWidget(buttons)
+        layout.addLayout(buttons)
 
     def _url(self) -> str | None:
         url = self.url.text().strip()
@@ -72,18 +98,29 @@ class AsrServerDialog(QDialog):
         if url is None:
             return
         base = http_base_from_ws(url)
-        self.status.setText(f"Checking {base}/ready …")
+        self.status.setText(f"Checking {base} …")
+        self.test_button.setEnabled(False)
 
         def done(result, error) -> None:
-            self.status.setText(f"ASR: {result}" if error is None else f"Error: {error}")
+            self.test_button.setEnabled(True)
+            if error is not None:
+                self.status.setText(f"Error: {error}")
+            elif result == TOKEN_REJECTED:
+                self.status.setText("ASR: token rejected (HTTP 401). Check the API Token; the server's "
+                                    "API_TOKEN must match exactly.")
+            else:
+                accepted = result == "ready" and self.token.text().strip()
+                self.status.setText(f"ASR: {result}" + (" – token accepted" if accepted else ""))
 
-        run_async(self._runner, fetch_status(base), done)
+        run_async(self._runner, fetch_status(base, self.token.text()), done)
 
     def _save(self) -> None:
         url = self._url()
         if url is None:
             return
         self._settings.ws_url = url
+        self._settings.asr_token = self.token.text().strip()
+        self._settings.asr_context = self.context.text().strip()
         self.accept()
 
     def exec_front(self) -> int:

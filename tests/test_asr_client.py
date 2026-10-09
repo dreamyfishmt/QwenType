@@ -12,16 +12,26 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QCoreApplication, QObject, Slot
 from websockets.asyncio.server import serve
+from websockets.datastructures import Headers
+from websockets.http11 import Response
 
 from qwentype.aio import AsyncRunner
-from qwentype.asr.qwen3 import Qwen3StreamingSession, fetch_status
+from qwentype.asr.qwen3 import TOKEN_REJECTED, Qwen3StreamingSession, fetch_status
+
+
+def _json_response(status, reason, body):
+    data = json.dumps(body).encode()
+    return Response(status, reason, Headers([("Content-Type", "application/json"),
+                                             ("Content-Length", str(len(data)))]), data)
 
 
 class FakeServer:
-    def __init__(self, mode="ok"):
+    def __init__(self, mode="ok", token=""):
         self.mode = mode
+        self.token = token
         self.received = bytearray()
         self.query = None
+        self.start_msg = None
         self.order_ok = True
         self.loop = asyncio.new_event_loop()
         self.started = threading.Event()
@@ -33,10 +43,26 @@ class FakeServer:
         self.loop.run_until_complete(self._main())
 
     async def _main(self):
-        async with serve(self._handler, "127.0.0.1", 0) as server:
+        async with serve(self._handler, "127.0.0.1", 0, process_request=self._process_request) as server:
             self.port = server.sockets[0].getsockname()[1]
             self.started.set()
             await asyncio.Future()
+
+    def _authorized(self, headers):
+        return not self.token or headers.get("Authorization") == f"Bearer {self.token}"
+
+    def _process_request(self, connection, request):
+        # Mirrors server.py: /ready is open, everything else (incl. the WS handshake) needs the token.
+        path = request.path.split("?")[0]
+        if path == "/ready":
+            return _json_response(200, "OK", {"status": "ready"})
+        if not self._authorized(request.headers):
+            if path == "/health":
+                return _json_response(401, "Unauthorized", {"detail": "Invalid or missing API token"})
+            return connection.respond(403, "Invalid or missing API token\n")
+        if path == "/health":
+            return _json_response(200, "OK", {"status": "ready"})
+        return None
 
     async def _handler(self, ws):
         self.query = ws.request.path
@@ -55,13 +81,17 @@ class FakeServer:
                 if not started:
                     self.order_ok = False
                 self.received += msg
+                if self.mode == "limit" and len(self.received) >= 16000 and len(self.received) - len(msg) < 16000:
+                    await ws.send(json.dumps({"type": "info", "message": "max_duration_reached=0.5s"}))
                 if len(self.received) >= 32000 and len(self.received) - len(msg) < 32000:
                     await ws.send(json.dumps({"type": "partial", "text": "", "language": "Chinese"}))
                     await ws.send(json.dumps({"type": "partial", "text": "你好", "language": "Chinese"}))
                 continue
             data = json.loads(msg)
             if data["type"] == "start":
-                started = data == {"type": "start", "format": "pcm_s16le", "sample_rate_hz": 16000}
+                self.start_msg = data
+                started = {k: data[k] for k in ("type", "format", "sample_rate_hz")} == {
+                    "type": "start", "format": "pcm_s16le", "sample_rate_hz": 16000}
                 await ws.send(json.dumps({"type": "info", "message": "language=Chinese"}))
             elif data["type"] == "stop":
                 if self.mode == "nofinal":
@@ -93,6 +123,10 @@ class Collector(QObject):
     def error(self, m):
         self.events.append(("error", m))
 
+    @Slot(float)
+    def limit(self, seconds):
+        self.events.append(("limit", seconds))
+
 
 class AsrClientTest(unittest.TestCase):
     @classmethod
@@ -104,10 +138,11 @@ class AsrClientTest(unittest.TestCase):
     def tearDownClass(cls):
         cls.runner.stop()
 
-    def _session(self, port, language="zh-CN", ready_timeout=5.0, final_timeout=10.0):
+    def _session(self, port, language="zh-CN", ready_timeout=5.0, final_timeout=10.0, token="", context=""):
         s = Qwen3StreamingSession(self.runner, f"ws://127.0.0.1:{port}/transcribe-streaming", language,
-                                  ready_timeout, final_timeout)
+                                  ready_timeout, final_timeout, token=token, context=context)
         c = Collector()
+        s.events.audio_limit.connect(c.limit)
         s.events.ready.connect(c.ready)
         s.events.partial.connect(c.partial)
         s.events.final.connect(c.final)
@@ -193,6 +228,53 @@ class AsrClientTest(unittest.TestCase):
             self.app.processEvents()
             time.sleep(0.01)
         self.assertFalse([e for e in c.events if e[0] in ("final", "error")])
+
+    def _utterance(self, srv, **kw):
+        s, c = self._session(srv.port, **kw)
+        s.start()
+        s.send_audio(b"\x00\x00" * 1600)
+        s.stop()
+        self._wait(c)
+        return c
+
+    def test_token_sent_in_header(self):
+        srv = FakeServer(token="s3cret")
+        c = self._utterance(srv, token="s3cret")
+        self.assertEqual(c.events[-1], ("final", "你好世界", "Chinese"))
+
+    def test_wrong_or_missing_token(self):
+        srv = FakeServer(token="s3cret")
+        self.assertEqual(self._utterance(srv, token="nope").events[-1], ("error", "ASR token rejected"))
+        self.assertEqual(self._utterance(srv).events[-1], ("error", "ASR server requires a token"))
+
+    def test_context_in_start_message(self):
+        srv = FakeServer()
+        self._utterance(srv, context="Vocabulary: Kubernetes, 张三")
+        self.assertEqual(srv.start_msg["context"], "Vocabulary: Kubernetes, 张三")
+        srv2 = FakeServer()
+        self._utterance(srv2)
+        self.assertNotIn("context", srv2.start_msg)
+
+    def test_server_audio_limit(self):
+        srv = FakeServer("limit")
+        s, c = self._session(srv.port)
+        s.start()
+        for _ in range(6):
+            s.send_audio(b"\x01\x00" * 1600)
+        self._wait(c, ("limit",))
+        self.assertIn(("limit", 0.5), c.events)
+        s.stop()
+        self._wait(c)
+        self.assertEqual(c.events[-1][0], "final")
+
+    def test_status_checks_token(self):
+        srv = FakeServer(token="s3cret")
+        base = f"http://127.0.0.1:{srv.port}"
+        self.assertEqual(self.runner.submit(fetch_status(base, "s3cret")).result(10), "ready")
+        self.assertEqual(self.runner.submit(fetch_status(base, "bad")).result(10), TOKEN_REJECTED)
+        self.assertEqual(self.runner.submit(fetch_status(base, "")).result(10), TOKEN_REJECTED)
+        open_srv = FakeServer()
+        self.assertEqual(self.runner.submit(fetch_status(f"http://127.0.0.1:{open_srv.port}")).result(10), "ready")
 
     def test_status_offline(self):
         fut = self.runner.submit(fetch_status("http://127.0.0.1:1", timeout=15.0))
