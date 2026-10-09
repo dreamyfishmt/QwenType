@@ -75,6 +75,9 @@ files and the final exe size. To start QwenType automatically, use **Start with 
 
 Unit tests: `uv run -m unittest discover -s tests -t .`
 
+GitHub Actions (`.github/workflows/build.yml`) runs the tests and builds `QwenType.exe` on Windows for every push and
+pull request; the exe is attached as a workflow artifact. Pushing a `v*` tag also publishes it as a GitHub release.
+
 ## Elevated (administrator) windows
 
 Windows doesn't let a normal process send input to an app running as administrator (UIPI). To dictate into
