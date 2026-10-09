@@ -82,3 +82,13 @@ pull request; the exe is attached as a workflow artifact. Pushing a `v*` tag als
 
 Windows doesn't let a normal process send input to an app running as administrator (UIPI). To dictate into
 elevated windows, such as an admin terminal or Task Manager, run QwenType as administrator too.
+
+## Build your own
+
+The whole app was generated from [`client-prompt-qwentype.md`](client-prompt-qwentype.md). To build your own
+variant, for example with another hotkey, ASR server or platform, edit that prompt and give it to a coding agent.
+
+## Acknowledgements
+
+Thanks to [yetone/voice-input-src](https://github.com/yetone/voice-input-src), whose client prompt this project's
+prompt is based on.
