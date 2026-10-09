@@ -40,25 +40,31 @@ all details.
 
 ### GPU on this PC (recommended)
 
-Prerequisites: an NVIDIA GPU with driver R580 or newer, and Docker Desktop with the WSL 2 backend.
+This is the short version of the server's [Quick start: GPU](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#quick-start-gpu-onnx-runtime).
 
-1. Download the model (~2.7 GB, pinned to the revisions the server was tested with):
+Prerequisites: an NVIDIA GPU with driver R580 or newer, Docker Desktop with the WSL 2 backend, and
+[uv](https://docs.astral.sh/uv/) (for `uvx`).
+
+1. Download the model (~2.7 GB, pinned to the tested revision):
 
    ```powershell
-   $D = "D:/models/qwen3-asr-1.7b-onnx"
-   uvx --from huggingface_hub hf download andrewleech/qwen3-asr-1.7b-onnx `
-     config.json tokenizer.json embed_tokens.bin encoder.onnx `
-     --revision df916193ac67e59347769891a21e10d81d12acdd --local-dir $D
-   uvx --from huggingface_hub hf download sorryhyun/qwen3-asr-onnx-gqa `
-     decoder-1.7b-fp16.onnx decoder-1.7b-fp16.onnx.data `
-     --revision 075249f70b56cdded1cf4b189cbdde0fb77aeec1 --local-dir $D
+   uvx --from huggingface_hub hf download dreamyfishmt/qwen3-asr-1.7b-onnx --revision f4a19c9705b87ea06685b1ffddd95772ffbde1b0 --local-dir D:/models/qwen3-asr-1.7b-onnx
    ```
+
+   [`dreamyfishmt/qwen3-asr-1.7b-onnx`](https://huggingface.co/dreamyfishmt/qwen3-asr-1.7b-onnx) repackages, unmodified,
+   the files of `andrewleech/qwen3-asr-1.7b-onnx` (encoder, embeddings, tokenizer) and `sorryhyun/qwen3-asr-onnx-gqa`
+   (decoder); its model card lists the exact source revisions.
+
+   If the download fails with a 401 from `cas-server.xethub.hf.co` (some proxies block Hugging Face's Xet storage),
+   set `$env:HF_HUB_DISABLE_XET = "1"` and run it again.
 
 2. Get [`compose.gpu.yaml`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/compose.gpu.yaml)
    and [`.env.gpu.example`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/.env.gpu.example)
-   from the server repository, copy `.env.gpu.example` to `.env` and set `MODEL_DIR=D:/models`.
+   from the server repository, copy `.env.gpu.example` to `.env` and set `MODEL_DIR=D:/models`. You can also
+   `git clone` the server repository instead, which also has the download script and test samples; see
+   [Quick start: GPU](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#quick-start-gpu-onnx-runtime).
 
-3. Start it (this pulls the image from GHCR) and wait for `Server is ready` in the log:
+3. Start it (this pulls the image from GHCR) and wait for `provider cuda`, then `Server is ready` in the log:
 
    ```powershell
    docker compose -f compose.gpu.yaml up -d
@@ -70,7 +76,8 @@ The server listens on `127.0.0.1:8907`, which is QwenType's default URL, so no t
 ### CPU server (VPS)
 
 Follow [CPU deployment](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#cpu-deployment) in the server
-README (`compose.cpu.yaml`, `.env.cpu.example`). The CPU image **requires** `API_TOKEN` (generate one with
+README (`compose.cpu.yaml`, `.env.cpu.example`). The CPU image **requires** `API_TOKEN`
+([Authentication](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#authentication); generate one with
 `openssl rand -hex 32`). With a domain and `--profile tls`, Caddy provides HTTPS automatically. Then, in QwenType's
 **ASR Server…** dialog, fill in:
 
@@ -97,7 +104,8 @@ Open **ASR Server…** in the tray menu:
 - **WebSocket URL**: default `ws://127.0.0.1:8907/transcribe-streaming`; use `wss://…` for a server behind HTTPS.
 - **API Token**: the server's `API_TOKEN`, sent as `Authorization: Bearer <token>` and stored encrypted with
   Windows DPAPI. Leave it empty if the server has no token.
-- **Hotwords**: optional context that biases recognition toward names and terms, e.g.
+- **Hotwords**: optional context (the stream's [`context`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#ws-transcribe-streaming)) that biases
+  recognition toward names and terms, e.g.
   `Vocabulary: Kubernetes, QwenType, 张三`. Keep it short; it is part of every decode. It is also passed to LLM
   refinement as preferred spellings.
 
