@@ -17,6 +17,7 @@ class AsrEvents(QObject):
     partial = Signal(str)  # full transcript so far (replace, don't append)
     final = Signal(str, str)  # final text, language reported by the server
     error = Signal(str)  # short, user-facing message
+    audio_limit = Signal(float)  # server stopped accepting audio after this many seconds
 
 
 class AsrSession(ABC):

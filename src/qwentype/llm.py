@@ -40,13 +40,16 @@ def chat_url(base_url: str) -> str:
     return base if base.endswith("/chat/completions") else base + "/chat/completions"
 
 
-def build_user_message(text: str, selected_language: str, detected_language: str) -> str:
+def build_user_message(text: str, selected_language: str, detected_language: str, vocabulary: str = "") -> str:
     selected = _LANGUAGE_NAMES.get(selected_language, selected_language) if selected_language else "auto-detect"
-    return (
-        f"Selected language: {selected}\n"
-        f"Language detected by the ASR server: {detected_language or 'unknown'}\n"
-        f"Transcript:\n{text}"
-    )
+    lines = [
+        f"Selected language: {selected}",
+        f"Language detected by the ASR server: {detected_language or 'unknown'}",
+    ]
+    if vocabulary.strip():
+        lines.append(f"User vocabulary (preferred spellings, use only if the audio clearly meant them): {vocabulary.strip()}")
+    lines.append(f"Transcript:\n{text}")
+    return "\n".join(lines)
 
 
 def accept_output(original: str, output: str) -> bool:
@@ -82,12 +85,12 @@ async def complete(base_url: str, api_key: str, model: str, messages: list[dict]
 
 
 async def refine(text: str, *, base_url: str, api_key: str, model: str, timeout: float,
-                 selected_language: str, detected_language: str) -> str:
+                 selected_language: str, detected_language: str, vocabulary: str = "") -> str:
     """Return the refined text, or the original text on any failure."""
     started = time.monotonic()
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_user_message(text, selected_language, detected_language)},
+        {"role": "user", "content": build_user_message(text, selected_language, detected_language, vocabulary)},
     ]
     try:
         output = clean_output(await complete(base_url, api_key, model, messages, timeout), text)

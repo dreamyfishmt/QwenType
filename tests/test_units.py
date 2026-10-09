@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from qwentype import llm
-from qwentype.asr.qwen3 import build_ws_url, describe_close
+from qwentype.asr.qwen3 import auth_headers, build_ws_url, describe_close, is_local_url, parse_max_duration
 from qwentype.audio import CHUNK_BYTES, Resampler, rms_level, to_pcm16
 from qwentype.injector import utf16_units
 from qwentype.settings import Settings, http_base_from_ws, is_valid_ws_url
@@ -41,6 +41,29 @@ class SettingsTest(unittest.TestCase):
             self.assertNotIn("llm_api_key_dpapi", json.loads(p.read_text(encoding="utf-8")))
             self.assertEqual(Settings.load(p).llm_api_key, "")
 
+    def test_asr_token_and_context(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            Settings(asr_token="tok-123", asr_context="Vocabulary: QwenType").save(p)
+            text = p.read_text(encoding="utf-8")
+            self.assertNotIn("tok-123", text)
+            self.assertIn("asr_token_dpapi", text)
+            t = Settings.load(p)
+            self.assertEqual((t.asr_token, t.asr_context), ("tok-123", "Vocabulary: QwenType"))
+            t.asr_token = ""
+            t.save(p)
+            self.assertEqual(Settings.load(p).asr_token, "")
+
+    def test_migrates_old_final_timeout(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            p.write_text('{"final_timeout_seconds": 10.0}', encoding="utf-8")  # v1 file
+            self.assertEqual(Settings.load(p).final_timeout_seconds, 30.0)
+            p.write_text('{"final_timeout_seconds": 15.0}', encoding="utf-8")  # user value kept
+            self.assertEqual(Settings.load(p).final_timeout_seconds, 15.0)
+            p.write_text('{"settings_version": 2, "final_timeout_seconds": 10.0}', encoding="utf-8")
+            self.assertEqual(Settings.load(p).final_timeout_seconds, 10.0)
+
     def test_bad_file(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "settings.json"
@@ -57,6 +80,16 @@ class AsrUrlTest(unittest.TestCase):
         self.assertEqual(build_ws_url(u, ""), u)
         self.assertEqual(build_ws_url(u, "zh-CN"), u + "?language=zh-CN")
         self.assertEqual(build_ws_url(u + "?a=1", "en"), u + "?a=1&language=en")
+
+    def test_auth_and_helpers(self):
+        self.assertEqual(auth_headers(""), {})
+        self.assertEqual(auth_headers(" abc "), {"Authorization": "Bearer abc"})
+        self.assertEqual(parse_max_duration("max_duration_reached=60s"), 60.0)
+        self.assertEqual(parse_max_duration("max_duration_reached=7.5s"), 7.5)
+        self.assertIsNone(parse_max_duration("language=Chinese"))
+        self.assertTrue(is_local_url("ws://127.0.0.1:8907/x"))
+        self.assertTrue(is_local_url("ws://localhost:8907/x"))
+        self.assertFalse(is_local_url("wss://asr.example.com/transcribe-streaming"))
 
     def test_close_codes(self):
         self.assertEqual(describe_close(1011, "Server not ready: loading_models", None), "ASR server not ready")
@@ -102,6 +135,10 @@ class LlmTest(unittest.TestCase):
         self.assertFalse(llm.accept_output("abc", ""))
         long = "这是一个比较长的句子，用来测试长度保护是否生效。" * 2
         self.assertFalse(llm.accept_output(long, long[:len(long) // 2]))
+
+    def test_vocabulary_in_user_message(self):
+        self.assertIn("QwenType", llm.build_user_message("t", "zh-CN", "Chinese", "Vocabulary: QwenType"))
+        self.assertNotIn("vocabulary", llm.build_user_message("t", "zh-CN", "Chinese", "").lower())
 
     def test_clean(self):
         self.assertEqual(llm.clean_output('"你好"', "你好"), "你好")

@@ -1,7 +1,8 @@
 """Settings stored as JSON in %APPDATA%\\QwenType\\settings.json.
 
-The LLM API key is never written in plain text on Windows: it is protected with
-DPAPI (CryptProtectData, current-user scope) and stored base64-encoded.
+Secrets (the ASR server token and the LLM API key) are never written in plain
+text on Windows: they are protected with DPAPI (CryptProtectData, current-user
+scope) and stored base64-encoded.
 """
 
 from __future__ import annotations
@@ -22,6 +23,10 @@ APP_NAME = "QwenType"
 
 DEFAULT_WS_URL = "ws://127.0.0.1:8907/transcribe-streaming"
 DEFAULT_LANGUAGE = "zh-CN"
+SETTINGS_VERSION = 2
+
+# In-memory field -> JSON key of its DPAPI-protected copy.
+SECRET_FIELDS = {"asr_token": "asr_token_dpapi", "llm_api_key": "llm_api_key_dpapi"}
 
 # (menu label, language code); "" = auto-detect (query parameter omitted)
 LANGUAGES: list[tuple[str, str]] = [
@@ -86,11 +91,17 @@ def _unprotect(blob: str) -> str:
 
 @dataclass
 class Settings:
+    settings_version: int = SETTINGS_VERSION
     ws_url: str = DEFAULT_WS_URL
+    # Hotwords / context sent in the "start" message to bias recognition,
+    # e.g. "Vocabulary: Kubernetes, QwenType, 张三". Empty = not sent.
+    asr_context: str = ""
     language: str = DEFAULT_LANGUAGE
     max_record_seconds: float = 60.0
     ready_timeout_seconds: float = 5.0
-    final_timeout_seconds: float = 10.0
+    # CPU servers compute the final result after "stop"; a long utterance on a
+    # small VPS can take well over 10 s.
+    final_timeout_seconds: float = 30.0
     # Text longer than this is pasted via the clipboard instead of typed.
     unicode_max_chars: int = 200
     # Process names (e.g. "mstsc.exe") that drop KEYEVENTF_UNICODE input: always paste.
@@ -101,8 +112,10 @@ class Settings:
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = ""
     llm_timeout_seconds: float = 8.0
-    # Kept in memory only; persisted encrypted as "llm_api_key_dpapi".
+    # Secrets: kept in memory only, persisted encrypted (see SECRET_FIELDS).
     llm_api_key: str = field(default="", repr=False)
+    # Shared secret of the ASR server (API_TOKEN), sent as "Authorization: Bearer <token>".
+    asr_token: str = field(default="", repr=False)
 
     @property
     def http_base(self) -> str:
@@ -126,7 +139,7 @@ class Settings:
         if not isinstance(raw, dict):
             return s
         for f in fields(cls):
-            if f.name == "llm_api_key" or f.name not in raw:
+            if f.name in SECRET_FIELDS or f.name not in raw:
                 continue
             value = raw[f.name]
             default = getattr(s, f.name)
@@ -146,20 +159,28 @@ class Settings:
                 setattr(s, f.name, value)
         if s.language not in {code for _, code in LANGUAGES}:
             s.language = DEFAULT_LANGUAGE
-        blob = raw.get("llm_api_key_dpapi")
-        if isinstance(blob, str) and blob:
-            try:
-                s.llm_api_key = _unprotect(blob)
-            except Exception as e:  # wrong user / corrupted
-                log.warning("Could not decrypt the stored API key: %s", e)
+        version = raw.get("settings_version")
+        if not isinstance(version, int) or version < 2:
+            # v1 stored the old 10 s default explicitly; move it to the new default.
+            if s.final_timeout_seconds == 10.0:
+                s.final_timeout_seconds = cls.final_timeout_seconds
+        s.settings_version = SETTINGS_VERSION
+        for name, key in SECRET_FIELDS.items():
+            blob = raw.get(key)
+            if isinstance(blob, str) and blob:
+                try:
+                    setattr(s, name, _unprotect(blob))
+                except Exception as e:  # wrong user / corrupted
+                    log.warning("Could not decrypt the stored %s: %s", name, e)
         return s
 
     def save(self, path: Path | None = None) -> None:
         path = path or settings_path()
         data = asdict(self)
-        key = data.pop("llm_api_key")
-        if key:
-            data["llm_api_key_dpapi"] = _protect(key)
+        for name, key in SECRET_FIELDS.items():
+            secret = data.pop(name)
+            if secret:
+                data[key] = _protect(secret)
         path.parent.mkdir(parents=True, exist_ok=True)
         # Atomic write: never leave a half-written settings file behind.
         fd, tmp = tempfile.mkstemp(prefix="settings.", suffix=".tmp", dir=path.parent)
