@@ -179,13 +179,14 @@ class FakeSession(AsrSession):
 class FakeBackend(AsrBackend):
     def __init__(self):
         self.sessions: list[FakeSession] = []
+        self.status_value = "ready"
 
     def create_session(self, language):
         self.sessions.append(FakeSession())
         return self.sessions[-1]
 
     async def status(self):
-        return "ready"
+        return self.status_value
 
 
 class FakeAudio:
@@ -210,6 +211,25 @@ class ControllerTest(unittest.TestCase):
     def tearDown(self):
         self.c.runner.stop()
         self.c.capsule.hide_now()
+
+    def _wait_status(self, status, timeout=3.0):
+        deadline = time.monotonic() + timeout
+        while self.c.tray._status != status and time.monotonic() < deadline:
+            QCoreApplication.processEvents()
+            time.sleep(0.01)
+        self.assertEqual(self.c.tray._status, status)
+
+    def test_status_retried_while_offline(self):
+        self.backend.status_value = "offline"
+        self.c.refresh_status()
+        self._wait_status("offline")
+        self.assertTrue(self.c._status_timer.isActive())
+        self.assertEqual(self.c._status_timer.interval(), 60_000)
+        self.assertEqual(self.c.tray.icon.icon().cacheKey(), self.c.tray._icon_offline.cacheKey())
+        self.backend.status_value = "ready"
+        self.c._status_timer.timeout.emit()  # the 60 s check
+        self._wait_status("ready")
+        self.assertFalse(self.c._status_timer.isActive())
 
     def _wait_idle(self, timeout=3.0):
         deadline = time.monotonic() + timeout

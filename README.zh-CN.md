@@ -103,6 +103,7 @@ CPU 服务器只在每段话的前 20 秒发送实时中间结果，最终结果
 [vLLM image (advanced)](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#vllm-image-advanced)。
 
 托盘菜单第一项显示服务状态：`ASR: ready`、`ASR: loading_models`、`ASR: offline` 或 `ASR: token rejected`。
+服务未就绪时托盘图标显示为灰色，QwenType 每 60 秒自动重新检查一次，服务恢复后图标会自动变回彩色。
 
 ## 配置服务连接
 

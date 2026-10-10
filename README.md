@@ -112,7 +112,8 @@ The original vLLM backend is no longer published and builds a ~14 GB image local
 concurrent users; see [vLLM image (advanced)](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#vllm-image-advanced).
 
 The first tray menu item shows the server state: `ASR: ready`, `ASR: loading_models`, `ASR: offline` or
-`ASR: token rejected`.
+`ASR: token rejected`. While the server isn't ready, the tray icon is gray and QwenType checks again every 60 s, so
+the icon turns back to color on its own once the server is up.
 
 ## Configure the server connection
 

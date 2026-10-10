@@ -35,6 +35,7 @@ log = logging.getLogger("qwentype")
 
 SHOW_DELAY_MS = 150  # capsule appears only after the key is held this long
 MIN_RECORD_S = 0.3  # shorter recordings are cancelled silently
+STATUS_RETRY_MS = 60_000  # while the ASR server isn't ready, check /ready this often
 
 
 class State(enum.Enum):
@@ -98,6 +99,7 @@ class Controller(QObject):
         self._max_timer = self._timer(0, self._on_max_duration)
         self._watchdog = self._timer(0, self._on_watchdog)
         self._poll_timer = self._timer(100, self._poll_key, single=False)
+        self._status_timer = self._timer(STATUS_RETRY_MS, self.refresh_status, single=False)
         self._update_recent()
 
     def _make_capsule(self) -> CapsuleWindow:
@@ -445,7 +447,17 @@ class Controller(QObject):
 
         def done(result, error) -> None:
             self._status_busy = False
-            self.tray.set_status(result if error is None and result else "offline")
+            status = result if error is None and result else "offline"
+            self.tray.set_status(status)
+            # Keep checking in the background until the server is ready (offline, loading_models,
+            # token rejected), so the tray icon and status recover without opening the menu.
+            if status == "ready":
+                if self._status_timer.isActive():
+                    log.info("ASR server is ready")
+                self._status_timer.stop()
+            elif not self._status_timer.isActive():
+                log.info("ASR server not ready (%s); checking every %d s", status, STATUS_RETRY_MS // 1000)
+                self._status_timer.start()
 
         run_async(self.runner, self.backend.status(), done)
 
@@ -521,6 +533,7 @@ class Controller(QObject):
 
     def quit(self) -> None:
         log.info("Quitting")
+        self._status_timer.stop()
         if self._session is not None:
             self._session.cancel()
             self._session = None

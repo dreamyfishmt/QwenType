@@ -23,7 +23,14 @@ implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 Source code: <a href="{SOURCE_URL}">{SOURCE_URL}</a>"""
 
 
-def draw_icon(size: int = 64, active: bool = False) -> QPixmap:
+ICON_COLORS = {
+    "idle": (QColor(96, 165, 250), QColor(139, 92, 246)),
+    "active": (QColor(255, 120, 120), QColor(220, 60, 110)),  # recording
+    "offline": (QColor(160, 166, 178), QColor(110, 116, 130)),  # ASR server not ready
+}
+
+
+def draw_icon(size: int = 64, state: str = "idle") -> QPixmap:
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
@@ -32,12 +39,9 @@ def draw_icon(size: int = 64, active: bool = False) -> QPixmap:
     p.scale(s, s)
 
     grad = QLinearGradient(0, 0, 64, 64)
-    if active:
-        grad.setColorAt(0, QColor(255, 120, 120))
-        grad.setColorAt(1, QColor(220, 60, 110))
-    else:
-        grad.setColorAt(0, QColor(96, 165, 250))
-        grad.setColorAt(1, QColor(139, 92, 246))
+    top, bottom = ICON_COLORS[state]
+    grad.setColorAt(0, top)
+    grad.setColorAt(1, bottom)
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(grad)
     p.drawRoundedRect(QRectF(2, 2, 60, 60), 16, 16)
@@ -80,7 +84,9 @@ class Tray(QObject):
     def __init__(self, settings: Settings, autostart: bool, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._icon_idle = app_icon()
-        self._icon_active = QIcon(draw_icon(64, active=True))
+        self._icon_active = QIcon(draw_icon(64, "active"))
+        self._icon_offline = QIcon(draw_icon(64, "offline"))
+        self._recording = False
         self._status = "…"
         self._hint = ""
 
@@ -161,9 +167,20 @@ class Tray(QObject):
         self._status = status
         self.status_action.setText(f"ASR: {status}")
         self._update_tooltip()
+        self._update_icon()
 
     def set_recording(self, recording: bool) -> None:
-        self.icon.setIcon(self._icon_active if recording else self._icon_idle)
+        self._recording = recording
+        self._update_icon()
+
+    def _update_icon(self) -> None:
+        if self._recording:
+            icon = self._icon_active
+        elif self._status in ("ready", "…"):  # "…": not checked yet
+            icon = self._icon_idle
+        else:
+            icon = self._icon_offline
+        self.icon.setIcon(icon)
 
     def set_hotkey(self, hotkey_id: str, mode: str) -> None:
         act = self._hotkey_actions.get(hotkey_id)
