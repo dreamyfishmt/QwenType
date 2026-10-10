@@ -94,12 +94,52 @@ class HotkeyTest(unittest.TestCase):
         self.assertTrue(hook.handle_mouse(WM_XBUTTONUP, 1))
         self.assertEqual(rec.events, ["pressed", "released"])
 
-    def test_escape_and_unknown_id(self):
-        hook = HotkeyHook(get_hotkey("no_such_key"))
-        self.assertEqual(hook.hotkey.id, "right_ctrl")
+    def test_unknown_id_falls_back(self):
+        self.assertEqual(HotkeyHook(get_hotkey("no_such_key")).hotkey.id, "right_ctrl")
+
+    def test_escape_only_captured_while_recording(self):
+        hook = HotkeyHook(get_hotkey("right_ctrl"))
         rec = Recorder(hook)
-        hook.handle_key(WM_KEYDOWN, VK_ESCAPE)
+        self.assertFalse(hook.handle_key(WM_KEYDOWN, VK_ESCAPE))  # idle: Esc belongs to the app
+        self.assertFalse(hook.handle_key(WM_KEYUP, VK_ESCAPE))
+        self.assertEqual(rec.events, [])
+        hook.capture_escape = True
+        self.assertTrue(hook.handle_key(WM_KEYDOWN, VK_ESCAPE))
+        hook.capture_escape = False  # the recording was cancelled
+        self.assertTrue(hook.handle_key(WM_KEYUP, VK_ESCAPE))  # its key-up is swallowed too
+        self.assertFalse(hook.handle_key(WM_KEYUP, VK_ESCAPE))
         self.assertEqual(rec.events, ["escape"])
+
+    def test_missed_key_up_is_recovered(self):
+        hook = HotkeyHook(get_hotkey("caps_lock"))
+        rec = Recorder(hook)
+        hook.handle_key(WM_KEYDOWN, 0x14, time_ms=1000)
+        hook.handle_key(WM_KEYDOWN, 0x14, time_ms=1500)  # auto-repeat
+        hook.handle_key(WM_KEYDOWN, 0x14, time_ms=2000)
+        self.assertEqual(rec.events, ["pressed"])
+        # The key-up was missed; the next press comes much later.
+        hook.handle_key(WM_KEYDOWN, 0x14, time_ms=9000)
+        self.assertEqual(rec.events, ["pressed", "released", "pressed"])
+        # The 32-bit tick count wraps around.
+        hook.handle_key(WM_KEYDOWN, 0x14, time_ms=0xFFFFFF00)
+        hook.handle_key(WM_KEYDOWN, 0x14, time_ms=0x10)
+        self.assertEqual(rec.events[-2:], ["released", "pressed"])
+        self.assertEqual(rec.events.count("pressed"), 3)
+
+    def test_mouse_button_never_repeats(self):
+        hook = HotkeyHook(get_hotkey("mouse_forward"))
+        rec = Recorder(hook)
+        hook.handle_mouse(WM_XBUTTONDOWN, 2, time_ms=100)
+        hook.handle_mouse(WM_XBUTTONDOWN, 2, time_ms=200)  # the button-up was missed
+        self.assertEqual(rec.events, ["pressed", "released", "pressed"])
+
+    def test_reset_after_polled_release(self):
+        hook = HotkeyHook(get_hotkey("right_ctrl"))
+        rec = Recorder(hook)
+        hook.handle_key(WM_KEYDOWN, 0xA3, flags=LLKHF_EXTENDED)
+        hook.reset()  # the controller saw the release by polling
+        hook.handle_key(WM_KEYDOWN, 0xA3, flags=LLKHF_EXTENDED)
+        self.assertEqual(rec.events, ["pressed", "pressed"])
 
 
 class SettingsDialogTest(unittest.TestCase):
@@ -264,10 +304,13 @@ class ControllerTest(unittest.TestCase):
 
     def test_escape_cancels(self):
         self.settings.hotkey_mode = "toggle"
+        self.assertFalse(self.c.hook.capture_escape)
         session = self._record()
+        self.assertTrue(self.c.hook.capture_escape)
         self.c._on_released()
         self.c._on_escape()
         self.assertIs(self.c.state, qmain.State.IDLE)
+        self.assertFalse(self.c.hook.capture_escape)
         self.assertEqual(session.calls, ["start", "cancel"])
 
     def test_toggle_mode_error_goes_idle(self):

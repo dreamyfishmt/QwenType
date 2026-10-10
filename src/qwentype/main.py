@@ -57,7 +57,7 @@ class Controller(QObject):
         self.runner = AsyncRunner()
         self.backend: AsrBackend = Qwen3StreamingBackend(self.runner, settings)
 
-        self.state = State.IDLE
+        self._state = State.IDLE
         self._utterance = 0
         self._session: AsrSession | None = None
         self._press_time = 0.0
@@ -115,6 +115,16 @@ class Controller(QObject):
         # Only for hold mode with a pass-through key: swallowed keys never update GetAsyncKeyState.
         if win32.IS_WINDOWS and self.hotkey.poll_vk and not self._toggle_mode:
             self._poll_timer.start()
+
+    @property
+    def state(self) -> State:
+        return self._state
+
+    @state.setter
+    def state(self, value: State) -> None:
+        self._state = value
+        # Esc cancels in these states; only then is it kept from the focused app.
+        self.hook.capture_escape = value in (State.RECORDING, State.FAILED, State.FINISHING, State.REFINING)
 
     def _timer(self, ms: int, slot, single: bool = True) -> QTimer:
         t = QTimer(self)
@@ -221,6 +231,7 @@ class Controller(QObject):
         self._release_polls += 1
         if self._release_polls >= 3:
             log.info("%s release detected by polling", self.hotkey.short_name)
+            self.hook.reset()
             self._on_released()
 
     def _on_show_timer(self) -> None:

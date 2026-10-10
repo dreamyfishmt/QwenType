@@ -12,7 +12,7 @@ QwenType 是一个只驻留在系统托盘的 Windows 10/11 应用。按住**右
 
 - **快捷键**：默认是右 Ctrl。可在托盘菜单 **Hotkey** 中改为右 Alt / AltGr、右 Shift、Caps Lock、Scroll Lock、Pause
   或鼠标侧键（选 Caps Lock、Scroll Lock、Pause 或鼠标侧键时，该键归 QwenType 专用，不再有原来的功能）。勾选
-  **Tap to start, tap to stop** 后无需一直按住：按一下开始，再按一下结束。两种模式下都可以按 **Esc** 取消当前录音。
+  **Tap to start, tap to stop** 后无需一直按住：按一下开始，再按一下结束。两种模式下都可以按 **Esc** 取消当前录音；只有在录音或等待结果期间 Esc 才会被 QwenType 截获，其他时候照常传给当前应用。
 - 托盘菜单 **Recent** 列出最近 10 条识别结果，点击即可复制。这些记录只保存在内存中。输入失败时，文字会被复制到剪贴板，不会丢失。
 
 - 默认语言为自动检测：QwenType 不发送 `language` 参数，由模型逐段识别语言。如需固定语言，在托盘菜单
@@ -162,7 +162,7 @@ uv run pyright                              # 类型检查
 
 `docs/capsule.gif` 由 `uv run python scripts/make_capsule_gif.py` 根据真实的胶囊窗口代码渲染生成。
 
-GitHub Actions（`.github/workflows/build.yml`）会在每次 push 和 pull request 时在 Linux 上运行 ruff 和 pyright，并在 Windows 上运行测试并构建
+GitHub Actions（`.github/workflows/build.yml`）会在每次 push 和 pull request 时在 Linux 上运行 ruff、pyright 和单元测试，并在 Windows 上再次运行测试并构建
 `QwenType.exe`，exe 作为 workflow artifact 提供下载（`QwenType-<版本>-<提交>.exe`）。推送 `v*` 标签（如 `v1.2.3`）时，
 会用这个版本号构建（写入文件属性、托盘提示和日志），并把 `QwenType-v1.2.3.exe` 发布为 GitHub Release。
 
