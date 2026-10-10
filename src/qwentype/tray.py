@@ -4,13 +4,23 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__
 from .hotkey import HOTKEYS, get_hotkey
 from .settings import LANGUAGES, Settings
 
 RECENT_LABEL_CHARS = 48
+SOURCE_URL = "https://github.com/dreamyfishmt/QwenType"
+ABOUT_TEXT = f"""<b>QwenType {{version}}</b><br>Hold a key, speak, release: local Qwen3-ASR voice typing.<br><br>
+Copyright (c) 2026 dreamyfishmt<br><br>
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.<br><br>
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+<a href="https://www.gnu.org/licenses/agpl-3.0.html">GNU Affero General Public License</a> for more details.<br><br>
+Source code: <a href="{SOURCE_URL}">{SOURCE_URL}</a>"""
 
 
 def draw_icon(size: int = 64, active: bool = False) -> QPixmap:
@@ -132,6 +142,7 @@ class Tray(QObject):
         self.menu.addAction(self.autostart_action)
 
         self.menu.addSeparator()
+        self.menu.addAction("About QwenType…", self.show_about)
         self.menu.addAction("Quit", self.quit_requested.emit)
         self.menu.aboutToShow.connect(self.menu_opened.emit)
 
@@ -191,6 +202,9 @@ class Tray(QObject):
         self.autostart_action.blockSignals(True)
         self.autostart_action.setChecked(checked)
         self.autostart_action.blockSignals(False)
+
+    def show_about(self) -> None:
+        QMessageBox.about(None, "About QwenType", ABOUT_TEXT.format(version=__version__))
 
     def _update_tooltip(self) -> None:
         self.icon.setToolTip(f"QwenType {__version__} — ASR: {self._status}\n{self._hint}")

@@ -193,3 +193,14 @@ variant, for example with another hotkey, ASR server or platform, edit that prom
 
 Thanks to [yetone/voice-input-src](https://github.com/yetone/voice-input-src), whose client prompt this project's
 prompt is based on.
+
+## License
+
+Copyright (c) 2026 dreamyfishmt
+
+QwenType is free software: you can redistribute it and/or modify it under the terms of the
+[GNU Affero General Public License](LICENSE) as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version (`AGPL-3.0-or-later`). It is distributed WITHOUT ANY WARRANTY; see the
+license for details.
+
+Earlier versions were released under the MIT License; copies obtained under those terms remain available under MIT.

@@ -3,7 +3,7 @@ name = "qwentype"
 version = "0.1.0"
 description = "Hold Right Ctrl, speak, release — local Qwen3-ASR voice typing for Windows."
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [

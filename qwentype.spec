@@ -129,7 +129,7 @@ def _make_version_file(path: Path) -> str:
         "OriginalFilename": f"{APP}.exe",
         "ProductName": APP,
         "ProductVersion": VERSION,
-        "LegalCopyright": "MIT License",
+        "LegalCopyright": "Copyright (c) 2026 dreamyfishmt. License: AGPL-3.0-or-later",
     }
     table = ", ".join(f"StringStruct({k!r}, {v!r})" for k, v in strings.items())
     path.parent.mkdir(parents=True, exist_ok=True)

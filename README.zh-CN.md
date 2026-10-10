@@ -178,3 +178,12 @@ Windows 不允许普通进程向以管理员身份运行的程序发送输入（
 ## 致谢
 
 感谢 [yetone/voice-input-src](https://github.com/yetone/voice-input-src) 仓库提供的客户端提示词，本项目的提示词在其基础上改写而成。
+
+## 许可证
+
+Copyright (c) 2026 dreamyfishmt
+
+QwenType 是自由软件：你可以依据自由软件基金会发布的 [GNU Affero 通用公共许可证](LICENSE) 第 3 版或（由你选择）任何更新的版本
+（`AGPL-3.0-or-later`）重新分发和/或修改它。本软件不提供任何担保，详见许可证全文。以上为说明性译文，具有法律效力的是英文许可证原文。
+
+更早的版本以 MIT 许可证发布，已依据该许可证获得的副本仍可继续按 MIT 条款使用。
