@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -74,15 +75,51 @@ def clean_output(output: str, original: str) -> str:
     return out
 
 
+# One pooled client per event loop (in the app: the AsyncRunner's), so consecutive refinements reuse
+# the TCP/TLS connection instead of paying a new handshake each time. URL, key and timeout are passed
+# per request, so changed LLM settings apply at once without rebuilding the client.
+KEEPALIVE_SECONDS = 60.0  # httpx's default (5 s) would drop the connection between utterances
+_client: httpx.AsyncClient | None = None
+_client_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client, _client_loop
+    loop = asyncio.get_running_loop()
+    if _client is None or _client_loop is not loop or _client.is_closed:
+        limits = httpx.Limits(max_keepalive_connections=2, keepalive_expiry=KEEPALIVE_SECONDS)
+        _client, _client_loop = httpx.AsyncClient(limits=limits), loop
+    return _client
+
+
+async def close_client() -> None:
+    """Close the pooled client (call on the loop it was created on, e.g. at shutdown)."""
+    global _client, _client_loop
+    client, _client, _client_loop = _client, None, None
+    if client is not None:
+        await client.aclose()
+
+
 async def complete(base_url: str, api_key: str, model: str, messages: list[dict], timeout: float) -> str:
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     payload = {"model": model, "messages": messages, "temperature": 0, "stream": False}
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.post(chat_url(base_url), headers=headers, json=payload)
-        r.raise_for_status()
-        data = r.json()
+    client = _get_client()
+    url = chat_url(base_url)
+    started = time.monotonic()
+    try:
+        r = await client.post(url, headers=headers, json=payload, timeout=timeout)
+    except httpx.RemoteProtocolError:
+        # The server closed an idle keep-alive connection just as it was reused: retry once on a
+        # new connection, within what is left of the timeout.
+        remaining = timeout - (time.monotonic() - started)
+        if remaining < 0.5:
+            raise
+        log.debug("LLM connection was closed by the server; retrying")
+        r = await client.post(url, headers=headers, json=payload, timeout=remaining)
+    r.raise_for_status()
+    data = r.json()
     return str(data["choices"][0]["message"]["content"] or "")
 
 

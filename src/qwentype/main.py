@@ -541,6 +541,10 @@ class Controller(QObject):
         self.audio.shutdown()
         self.capsule.hide_now()
         self.tray.hide()
+        try:
+            self.runner.submit(llm.close_client()).result(1.0)
+        except Exception as e:
+            log.debug("Closing the LLM client: %s", e)
         self.runner.stop()
         self.app.quit()
 
