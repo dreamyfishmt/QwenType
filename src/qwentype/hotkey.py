@@ -13,6 +13,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import threading
+import time
 from ctypes import wintypes
 from dataclasses import dataclass
 
@@ -38,6 +39,10 @@ VK_ESCAPE = 0x1B
 VK_LCONTROL = 0xA2
 # AltGr layouts send a fake Left Ctrl with this scan code together with Right Alt.
 ALTGR_FAKE_LCTRL_SCAN = 0x21D
+# Auto-repeat sends key-downs at least every ~1 s (the longest repeat delay Windows allows).
+# A key-down after a longer gap while the key is still "down" means its key-up was missed
+# (e.g. it was released on the secure desktop of a UAC prompt): treat it as a new press.
+MISSED_UP_GAP_MS = 1500
 
 # dwExtraInfo marker on events injected by QwenType itself (see injector.py).
 INJECTED_MARKER = 0x5157_5459  # "QWTY"
@@ -126,7 +131,7 @@ if IS_WINDOWS:
 class HotkeyHook(QObject):
     """Emits pressed / released for the hotkey, other_key for any other key
     pressed while a modifier hotkey is held (i.e. a shortcut such as Ctrl+C),
-    and escape for every Esc key press."""
+    and escape for Esc while capture_escape is set (Esc is then swallowed)."""
 
     pressed = Signal()
     released = Signal()
@@ -142,6 +147,15 @@ class HotkeyHook(QObject):
         self._procs: list = []  # keep the ctypes callbacks alive
         self._down = False
         self._other_reported = False
+        self._last_down_ms = 0
+        self._esc_swallowed = False
+        # Set by the UI thread while a recording can be cancelled; only then is Esc taken away
+        # from the focused app. A plain bool: reads and writes are atomic.
+        self.capture_escape = False
+
+    def reset(self) -> None:
+        """Forget a held key, e.g. after its release was detected by polling (the hook missed it)."""
+        self._down = False
 
     def start(self) -> None:
         if not IS_WINDOWS:
@@ -213,7 +227,9 @@ class HotkeyHook(QObject):
         if n_code == 0:  # HC_ACTION
             try:
                 kb = KBDLLHOOKSTRUCT.from_address(l_param)
-                if kb.dwExtraInfo != INJECTED_MARKER and self.handle_key(w_param, kb.vkCode, kb.scanCode, kb.flags):
+                if kb.dwExtraInfo != INJECTED_MARKER and self.handle_key(
+                    w_param, kb.vkCode, kb.scanCode, kb.flags, kb.time
+                ):
                     return 1  # swallowed
             except Exception:  # never let an exception escape into the hook chain
                 log.exception("Keyboard hook callback failed")
@@ -223,7 +239,9 @@ class HotkeyHook(QObject):
         if n_code == 0 and w_param in (WM_XBUTTONDOWN, WM_XBUTTONUP):
             try:
                 ms = MSLLHOOKSTRUCT.from_address(l_param)
-                if ms.dwExtraInfo != INJECTED_MARKER and self.handle_mouse(w_param, (ms.mouseData >> 16) & 0xFFFF):
+                if ms.dwExtraInfo != INJECTED_MARKER and self.handle_mouse(
+                    w_param, (ms.mouseData >> 16) & 0xFFFF, ms.time
+                ):
                     return 1
             except Exception:
                 log.exception("Mouse hook callback failed")
@@ -231,9 +249,17 @@ class HotkeyHook(QObject):
 
     # -- event logic (platform independent, unit-tested) -------------------------
 
-    def _set_down(self, down: bool) -> None:
+    def _set_down(self, down: bool, time_ms: int | None, repeats: bool = True) -> None:
+        now = int(time.monotonic() * 1000) if time_ms is None else time_ms
         if down:
-            if not self._down:  # ignore auto-repeat
+            # Event times are a 32-bit millisecond tick count that wraps around.
+            gap = (now - self._last_down_ms) & 0xFFFFFFFF
+            if self._down and (not repeats or gap > MISSED_UP_GAP_MS):
+                log.info("Hotkey release was missed; treating the key-down as a new press")
+                self._down = False
+                self.released.emit()
+            self._last_down_ms = now
+            if not self._down:  # otherwise auto-repeat
                 self._down = True
                 self._other_reported = False
                 self.pressed.emit()
@@ -241,7 +267,7 @@ class HotkeyHook(QObject):
             self._down = False
             self.released.emit()
 
-    def handle_key(self, msg: int, vk: int, scan: int = 0, flags: int = 0) -> bool:
+    def handle_key(self, msg: int, vk: int, scan: int = 0, flags: int = 0, time_ms: int | None = None) -> bool:
         """Process one keyboard event; returns True if it must be swallowed."""
         is_down = msg in (WM_KEYDOWN, WM_SYSKEYDOWN)
         is_up = msg in (WM_KEYUP, WM_SYSKEYUP)
@@ -252,19 +278,25 @@ class HotkeyHook(QObject):
             and (hk.extended is None or hk.extended == bool(flags & LLKHF_EXTENDED))
             and (is_down or is_up)
         ):
-            self._set_down(is_down)
+            self._set_down(is_down, time_ms)
             return not hk.modifier
         if vk == VK_LCONTROL and scan == ALTGR_FAKE_LCTRL_SCAN:
             return False  # part of AltGr, not a shortcut
-        if is_down and vk == VK_ESCAPE:
-            self.escape.emit()
+        if vk == VK_ESCAPE:
+            if is_down and self.capture_escape:
+                self._esc_swallowed = True
+                self.escape.emit()
+                return True
+            if is_up and self._esc_swallowed:
+                self._esc_swallowed = False
+                return True  # the app never saw the key-down
         if is_down and self._down and hk.modifier and not self._other_reported:
             self._other_reported = True
             self.other_key.emit()
         return False
 
-    def handle_mouse(self, msg: int, xbutton: int) -> bool:
+    def handle_mouse(self, msg: int, xbutton: int, time_ms: int | None = None) -> bool:
         if not self.hotkey.xbutton or xbutton != self.hotkey.xbutton:
             return False
-        self._set_down(msg == WM_XBUTTONDOWN)
+        self._set_down(msg == WM_XBUTTONDOWN, time_ms, repeats=False)  # mouse buttons don't auto-repeat
         return True

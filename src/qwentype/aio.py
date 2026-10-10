@@ -45,3 +45,5 @@ class AsyncRunner:
             pass
         self.loop.call_soon_threadsafe(self.loop.stop)
         self._thread.join(timeout)
+        if not self._thread.is_alive():
+            self.loop.close()

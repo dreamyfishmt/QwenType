@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   lint:
-    name: Lint and type check
+    name: Lint, type check and tests (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,6 +37,15 @@ jobs:
 
       - name: Pyright
         run: uv run pyright
+
+      # Fast feedback: the same tests run again on Windows in the build job.
+      - name: Install Qt runtime libraries
+        run: sudo apt-get update -q && sudo apt-get install -y -q libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run -m unittest discover -s tests -t . -v
 
   build:
     name: Windows exe

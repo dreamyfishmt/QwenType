@@ -14,7 +14,8 @@ into the focused app. Shortcuts that use Right Ctrl (Ctrl+C, …) keep working a
 - **Hotkey**: Right Ctrl by default. Under **Hotkey** in the tray menu, pick Right Alt / AltGr, Right Shift,
   Caps Lock, Scroll Lock, Pause or a mouse side button instead (Caps Lock, Scroll Lock, Pause and the side buttons are
   then reserved for QwenType and lose their usual function). Turn on **Tap to start, tap to stop** to dictate without
-  holding the key. **Esc** cancels the current recording in either mode.
+  holding the key. **Esc** cancels the current recording in either mode; it is only taken from the focused app while a
+  recording (or its result) is in progress.
 - **Recent** in the tray menu lists the last 10 transcripts; click one to copy it. They are kept in memory only.
   If typing fails, the text is copied to the clipboard so it isn't lost.
 
@@ -112,7 +113,8 @@ The original vLLM backend is no longer published and builds a ~14 GB image local
 concurrent users; see [vLLM image (advanced)](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#vllm-image-advanced).
 
 The first tray menu item shows the server state: `ASR: ready`, `ASR: loading_models`, `ASR: offline` or
-`ASR: token rejected`.
+`ASR: token rejected`. While the server isn't ready, the tray icon is gray and QwenType checks again every 60 s, so
+the icon turns back to color on its own once the server is up.
 
 ## Configure the server connection
 
@@ -174,8 +176,8 @@ uv run pyright                              # type check
 
 `docs/capsule.gif` is rendered from the real capsule code by `uv run python scripts/make_capsule_gif.py`.
 
-GitHub Actions (`.github/workflows/build.yml`) runs ruff and pyright on Linux, and runs the tests and builds
-`QwenType.exe` on Windows for every push and pull request; the exe is attached as a workflow artifact (`QwenType-<version>-<commit>.exe`). Pushing a `v*` tag, e.g.
+GitHub Actions (`.github/workflows/build.yml`) runs ruff, pyright and the tests on Linux, and runs the tests again and
+builds `QwenType.exe` on Windows for every push and pull request; the exe is attached as a workflow artifact (`QwenType-<version>-<commit>.exe`). Pushing a `v*` tag, e.g.
 `v1.2.3`, builds with that version (file properties, tray tooltip and log) and publishes `QwenType-v1.2.3.exe` as a
 GitHub release.
 
