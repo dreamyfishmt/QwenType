@@ -132,7 +132,8 @@ token 填错会立刻提示，而不是等到录音时才失败。
 单元测试：`uv run -m unittest discover -s tests -t .`
 
 GitHub Actions（`.github/workflows/build.yml`）会在每次 push 和 pull request 时在 Windows 上运行测试并构建
-`QwenType.exe`，exe 作为 workflow artifact 提供下载。推送 `v*` 标签时还会把它发布为 GitHub Release。
+`QwenType.exe`，exe 作为 workflow artifact 提供下载（`QwenType-<版本>-<提交>.exe`）。推送 `v*` 标签（如 `v1.2.3`）时，
+会用这个版本号构建（写入文件属性、托盘提示和日志），并把 `QwenType-v1.2.3.exe` 发布为 GitHub Release。
 
 ## 管理员权限窗口
 

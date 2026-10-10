@@ -6,7 +6,11 @@ import os
 import shutil
 import struct
 import sys
+from importlib.metadata import version as _dist_version
 from pathlib import Path
+
+from packaging.version import Version
+from PyInstaller.utils.hooks import copy_metadata
 
 ROOT = Path(SPECPATH)
 SRC = ROOT / "src"
@@ -109,11 +113,45 @@ def _make_icon(path: Path):
 
 icon = _make_icon(Path(workpath) / "QwenType.ico")
 
+# Version from the installed package metadata (pyproject.toml; CI sets it from the git tag).
+VERSION = _dist_version("qwentype")
+
+
+def _make_version_file(path: Path) -> str:
+    """Windows VERSIONINFO resource, shown in Explorer -> Properties -> Details."""
+    nums = (list(Version(VERSION).release) + [0, 0, 0, 0])[:4]
+    tup = tuple(nums)
+    strings = {
+        "CompanyName": APP,
+        "FileDescription": APP,
+        "FileVersion": VERSION,
+        "InternalName": APP,
+        "OriginalFilename": f"{APP}.exe",
+        "ProductName": APP,
+        "ProductVersion": VERSION,
+        "LegalCopyright": "MIT License",
+    }
+    table = ", ".join(f"StringStruct({k!r}, {v!r})" for k, v in strings.items())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "VSVersionInfo(\n"
+        f"  ffi=FixedFileInfo(filevers={tup}, prodvers={tup}, mask=0x3f, flags=0x0, OS=0x40004,\n"
+        "    fileType=0x1, subtype=0x0, date=(0, 0)),\n"
+        f"  kids=[StringFileInfo([StringTable('040904B0', [{table}])]),\n"
+        "        VarFileInfo([VarStruct('Translation', [1033, 1200])])]\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+version_file = _make_version_file(Path(workpath) / "version_info.txt")
+
 a = Analysis(
     [str(SRC / "qwentype" / "__main__.py")],
     pathex=[str(SRC)],
     binaries=[],
-    datas=[],
+    datas=copy_metadata("qwentype"),  # lets qwentype.__version__ work in the exe
     hiddenimports=["win32crypt"],
     hookspath=[],
     hooksconfig={},
@@ -156,6 +194,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=icon,
+    version=version_file,
 )
 
 # --- report ---------------------------------------------------------------------
@@ -177,5 +216,5 @@ print(f"[QwenType] Dropped total: {saved / 1024 / 1024:.1f} MiB (uncompressed)")
 print(f"[QwenType] UPX: {'enabled' if USE_UPX else 'not found, disabled'}")
 exe_path = Path(DISTPATH) / (APP + (".exe" if sys.platform == "win32" else ""))
 if exe_path.exists():
-    print(f"[QwenType] Final executable: {exe_path}  {exe_path.stat().st_size / 1024 / 1024:.1f} MiB")
+    print(f"[QwenType] Final executable: {exe_path}  {exe_path.stat().st_size / 1024 / 1024:.1f} MiB  (version {VERSION})")
 print("=" * 72)

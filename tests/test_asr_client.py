@@ -21,8 +21,11 @@ from qwentype.asr.qwen3 import TOKEN_REJECTED, Qwen3StreamingSession, fetch_stat
 
 def _json_response(status, reason, body):
     data = json.dumps(body).encode()
+    # websockets closes the TCP connection after a process_request response; say so, or the
+    # HTTP client may reuse the dead keep-alive connection for its next request.
     return Response(status, reason, Headers([("Content-Type", "application/json"),
-                                             ("Content-Length", str(len(data)))]), data)
+                                             ("Content-Length", str(len(data))),
+                                             ("Connection", "close")]), data)
 
 
 class FakeServer:

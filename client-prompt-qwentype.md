@@ -34,7 +34,7 @@ The ASR backend is a local Qwen3-ASR server (vLLM, FastAPI) running in Docker Co
    - Server status: on startup and whenever the tray menu opens, call `GET <http-base>/ready` in the background (200 = ready, 503 = loading with `{"status": "..."}`, connection refused = not running). Show the status in the tray tooltip and as a disabled first menu item, e.g. "ASR: ready" / "ASR: loading_models" / "ASR: offline".
 
 3. Language
-   - Default language must be Simplified Chinese (zh-CN), so Chinese recognition works out of the box.
+   - Default language must be Auto-detect: the client omits the `language` parameter and the model detects the language of each utterance. The parameter is only sent when the user explicitly picks a language in the menu.
    - Language submenu in the tray menu (radio items). Each item is sent to the server as the `language` query parameter:
 
      | Menu item | Code |
@@ -47,7 +47,7 @@ The ASR backend is a local Qwen3-ASR server (vLLM, FastAPI) running in Docker Co
      | 한국어 | `ko` |
 
    - Traditional Chinese is produced by the server (OpenCC, Taiwan phrasing, e.g. 软件→軟體); the client does no script conversion.
-   - Mixed Chinese-English speech works with zh-CN; the model keeps English words in Latin script.
+   - Mixed Chinese-English speech also works with zh-CN; the model keeps English words in Latin script.
    - The selection is stored in the settings file.
 
 4. Floating capsule window
