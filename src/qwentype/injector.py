@@ -14,7 +14,7 @@ import time
 from ctypes import wintypes
 
 from .hotkey import INJECTED_MARKER
-from .win32 import IS_WINDOWS, VK_RCONTROL, foreground_process_name, is_key_down
+from .win32 import IS_WINDOWS, foreground_process_name, is_key_down
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +24,8 @@ KEYEVENTF_UNICODE = 0x0004
 VK_CONTROL = 0x11
 VK_RETURN = 0x0D
 VK_V = 0x56
+# Unassigned virtual key: pressed while Alt is held so that releasing Alt doesn't open the menu bar.
+VK_MASK = 0xE8
 
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
@@ -102,7 +104,7 @@ class InjectionError(Exception):
 def utf16_units(text: str) -> list[int]:
     """UTF-16 code units; non-BMP characters become surrogate pairs."""
     data = text.encode("utf-16-le", "surrogatepass")
-    return [int.from_bytes(data[i:i + 2], "little") for i in range(0, len(data), 2)]
+    return [int.from_bytes(data[i : i + 2], "little") for i in range(0, len(data), 2)]
 
 
 def _key(vk: int = 0, scan: int = 0, flags: int = 0) -> INPUT:
@@ -118,10 +120,17 @@ def _send(events: list[INPUT]) -> int:
     return _user32.SendInput(len(events), arr, ctypes.sizeof(INPUT))
 
 
-def wait_for_right_ctrl_release(timeout: float = 30.0) -> bool:
-    """Typed characters must not combine with a held Ctrl into shortcuts."""
+def send_mask_key() -> None:
+    if IS_WINDOWS:
+        _send([_key(VK_MASK), _key(VK_MASK, flags=KEYEVENTF_KEYUP)])
+
+
+def wait_for_key_release(vk: int, timeout: float = 30.0) -> bool:
+    """Typed characters must not combine with a held modifier (the hotkey) into shortcuts."""
+    if not vk:
+        return True
     deadline = time.monotonic() + timeout
-    while is_key_down(VK_RCONTROL):
+    while is_key_down(vk):
         if time.monotonic() > deadline:
             return False
         time.sleep(0.01)
@@ -137,11 +146,13 @@ def type_unicode(text: str, batch_chars: int = 32) -> bool:
             events += [_key(VK_RETURN), _key(VK_RETURN, flags=KEYEVENTF_KEYUP)]
             continue
         for unit in utf16_units(ch):
-            events += [_key(scan=unit, flags=KEYEVENTF_UNICODE),
-                       _key(scan=unit, flags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)]
+            events += [
+                _key(scan=unit, flags=KEYEVENTF_UNICODE),
+                _key(scan=unit, flags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP),
+            ]
     step = batch_chars * 2
     for i in range(0, len(events), step):
-        batch = events[i:i + step]
+        batch = events[i : i + step]
         sent = _send(batch)
         if sent != len(batch):
             log.warning("SendInput inserted %d of %d events (error %d)", sent, len(batch), ctypes.get_last_error())
@@ -151,6 +162,7 @@ def type_unicode(text: str, batch_chars: int = 32) -> bool:
 
 
 # --- clipboard ---------------------------------------------------------------
+
 
 def _open_clipboard(retries: int = 20) -> None:
     for _ in range(retries):
@@ -216,9 +228,11 @@ def _set_clipboard_text(text: str) -> None:
         _user32.EmptyClipboard()
         _set_data(CF_UNICODETEXT, text.encode("utf-16-le") + b"\x00\x00")
         # Keep the transient text out of clipboard history / cloud clipboard.
-        for name, value in (("ExcludeClipboardContentFromMonitorProcessing", b"\x00"),
-                            ("CanIncludeInClipboardHistory", b"\x00\x00\x00\x00"),
-                            ("CanUploadToCloudClipboard", b"\x00\x00\x00\x00")):
+        for name, value in (
+            ("ExcludeClipboardContentFromMonitorProcessing", b"\x00"),
+            ("CanIncludeInClipboardHistory", b"\x00\x00\x00\x00"),
+            ("CanUploadToCloudClipboard", b"\x00\x00\x00\x00"),
+        ):
             fmt = _user32.RegisterClipboardFormatW(name)
             if fmt:
                 _set_data(fmt, value)
@@ -248,10 +262,14 @@ def paste_via_clipboard(text: str) -> None:
         saved = None  # unknown contents: leave the pasted text there rather than wiping it
     _set_clipboard_text(text)
     time.sleep(0.03)
-    sent = _send([
-        _key(VK_CONTROL), _key(VK_V),
-        _key(VK_V, flags=KEYEVENTF_KEYUP), _key(VK_CONTROL, flags=KEYEVENTF_KEYUP),
-    ])
+    sent = _send(
+        [
+            _key(VK_CONTROL),
+            _key(VK_V),
+            _key(VK_V, flags=KEYEVENTF_KEYUP),
+            _key(VK_CONTROL, flags=KEYEVENTF_KEYUP),
+        ]
+    )
     # The target reads the clipboard asynchronously after Ctrl+V.
     time.sleep(0.35)
     if saved is not None:
@@ -263,15 +281,17 @@ def paste_via_clipboard(text: str) -> None:
         raise InjectionError("Input blocked (run as administrator?)")
 
 
-def inject_text(text: str, unicode_max_chars: int = 200, clipboard_apps: list[str] | None = None) -> None:
+def inject_text(
+    text: str, unicode_max_chars: int = 200, clipboard_apps: list[str] | None = None, wait_vk: int = 0
+) -> None:
     """Blocking; call from a worker thread. Raises InjectionError with a short message."""
     if not text:
         return
     if not IS_WINDOWS:
         log.info("Text injection is only available on Windows (%d chars)", len(text))
         return
-    if not wait_for_right_ctrl_release():
-        raise InjectionError("Right Ctrl still held")
+    if not wait_for_key_release(wait_vk):
+        raise InjectionError("Hotkey still held")
     proc = foreground_process_name()
     force_paste = proc and proc in {a.lower() for a in (clipboard_apps or [])}
     if len(text) > unicode_max_chars or force_paste:

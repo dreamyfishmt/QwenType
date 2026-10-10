@@ -12,6 +12,7 @@ import math
 import random
 
 from PySide6.QtCore import (
+    Property,
     QEasingCurve,
     QParallelAnimationGroup,
     QPoint,
@@ -21,10 +22,19 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
-    Property,
     Signal,
 )
-from PySide6.QtGui import QColor, QCursor, QFont, QFontMetricsF, QGuiApplication, QLinearGradient, QPainter, QPen, QScreen
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QFont,
+    QFontMetricsF,
+    QGuiApplication,
+    QLinearGradient,
+    QPainter,
+    QPen,
+    QScreen,
+)
 from PySide6.QtWidgets import QWidget
 
 from . import win32
@@ -143,8 +153,9 @@ class CapsuleWindow(QWidget):
         self._closing = False
 
         font = QFont()
-        font.setFamilies(["Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Yu Gothic UI",
-                          "Malgun Gothic", "sans-serif"])
+        font.setFamilies(
+            ["Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Yu Gothic UI", "Malgun Gothic", "sans-serif"]
+        )
         font.setPixelSize(16)
         self.setFont(font)
         self._fm = QFontMetricsF(font)
@@ -325,8 +336,9 @@ class CapsuleWindow(QWidget):
         w = max(2, math.ceil(self._base_width() * s))
         h = max(2, math.ceil(HEIGHT * s))
         self.setGeometry(self._center.x() - w // 2, self._center.y() - h // 2, w, h)
-        self.wave.setGeometry(round(PAD_LEFT * s), round((HEIGHT - WAVE_H) / 2 * s),
-                              max(1, round(WAVE_W * s)), max(1, round(WAVE_H * s)))
+        self.wave.setGeometry(
+            round(PAD_LEFT * s), round((HEIGHT - WAVE_H) / 2 * s), max(1, round(WAVE_W * s)), max(1, round(WAVE_H * s))
+        )
         if self._blur_active:
             dpr = self.devicePixelRatioF()
             win32.set_round_region(int(self.winId()), round(w * dpr), round(h * dpr), round(RADIUS * s * dpr))
@@ -359,5 +371,8 @@ class CapsuleWindow(QWidget):
         text = self._fm.elidedText(self._text, Qt.TextElideMode.ElideLeft, self._label_w)
         p.setPen(self._color)
         p.setFont(self.font())
-        p.drawText(QRectF(x, 0, self._label_w + 2, HEIGHT),
-                   int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), text)
+        p.drawText(
+            QRectF(x, 0, self._label_w + 2, HEIGHT),
+            int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+            text,
+        )

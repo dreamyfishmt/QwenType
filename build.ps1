@@ -6,10 +6,11 @@
     .\build.ps1 build     # uv run pyinstaller qwentype.spec  ->  dist\QwenType.exe
     .\build.ps1 install   # copy to %LOCALAPPDATA%\Programs\QwenType + Start Menu shortcut
     .\build.ps1 clean     # remove build\, dist\ and __pycache__
+    .\build.ps1 check     # ruff, pyright and the unit tests (what CI runs)
 #>
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('run', 'build', 'install', 'clean')]
+    [ValidateSet('run', 'build', 'install', 'clean', 'check')]
     [string]$Task = 'run'
 )
 
@@ -64,6 +65,13 @@ switch ($Task) {
 
         Write-Host "Installed to $target" -ForegroundColor Green
         Write-Host "Start Menu shortcut: $lnkPath"
+    }
+
+    'check' {
+        Invoke-Uv run ruff check
+        Invoke-Uv run ruff format --check
+        Invoke-Uv run pyright
+        Invoke-Uv run -m unittest discover -s tests -t .
     }
 
     'clean' {

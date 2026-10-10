@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 import math
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable
 
 import numpy as np
 from PySide6.QtCore import QObject, Signal
@@ -44,9 +44,9 @@ class Resampler:
         if self._fir is not None:
             xx = np.concatenate((self._hist, x))
             x = np.convolve(xx, self._fir, mode="valid").astype(np.float32)
-            self._hist = xx[-(len(self._fir) - 1):]
+            self._hist = xx[-(len(self._fir) - 1) :]
         buf = np.concatenate((self._buf, x)) if self._buf.size else x
-        n_out = int(math.ceil((buf.size - 1 - self._pos) / self.ratio)) if buf.size - 1 > self._pos else 0
+        n_out = math.ceil((buf.size - 1 - self._pos) / self.ratio) if buf.size - 1 > self._pos else 0
         if n_out <= 0:
             self._buf = buf
             return np.zeros(0, dtype=np.float32)
@@ -55,7 +55,7 @@ class Resampler:
         frac = (idx - i0).astype(np.float32)
         out = buf[i0] * (1.0 - frac) + buf[i0 + 1] * frac
         new_pos = self._pos + self.ratio * n_out
-        drop = int(math.floor(new_pos))
+        drop = math.floor(new_pos)
         self._buf = buf[drop:]
         self._pos = new_pos - drop
         return out
@@ -182,8 +182,9 @@ class AudioCapture(QObject):
                     return stream, rate, ch
                 except Exception as e:
                     last_error = e
-                    log.debug("Open failed (device=%s rate=%s ch=%s auto_convert=%s): %s",
-                              device, rate, ch, ex is not None, e)
+                    log.debug(
+                        "Open failed (device=%s rate=%s ch=%s auto_convert=%s): %s", device, rate, ch, ex is not None, e
+                    )
         raise last_error or RuntimeError("no input device")
 
     def _callback(self, indata, frames, time_info, status) -> None:  # PortAudio thread

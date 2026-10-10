@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
 from .aio import AsyncRunner
 
-_pending: set["_Call"] = set()
+_pending: set[_Call] = set()
 
 
 class _Call(QObject):
     done = Signal(object, object)  # result, exception
 
 
-def run_async(runner: AsyncRunner, coro: Coroutine[Any, Any, Any],
-              callback: Callable[[Any, BaseException | None], None]):
+def run_async(
+    runner: AsyncRunner, coro: Coroutine[Any, Any, Any], callback: Callable[[Any, BaseException | None], None]
+):
     """callback(result, error) runs on the UI thread (queued signal)."""
     call = _Call()
     _pending.add(call)
