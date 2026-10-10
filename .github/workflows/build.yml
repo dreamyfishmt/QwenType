@@ -22,6 +22,8 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    outputs:
+      label: ${{ steps.version.outputs.label }}
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +35,26 @@ jobs:
       - name: Sync dependencies
         run: uv sync --locked
 
+      # Tag builds take their version from the tag (v1.2.3 -> 1.2.3); other builds keep
+      # pyproject's version and add the commit to the file name.
+      - name: Set version
+        id: version
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+            uv version $tag.TrimStart("v") --frozen
+            if ($LASTEXITCODE -ne 0) { throw "Tag $tag is not a valid version" }
+            uv sync --frozen --reinstall-package qwentype
+            if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
+            $label = $tag
+          } else {
+            $label = "$(uv version --short)-$("${{ github.sha }}".Substring(0, 7))"
+          }
+          $version = uv run python -c "import qwentype; print(qwentype.__version__)"
+          "QwenType version: $version (file label: $label)"
+          "label=$label" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
@@ -41,17 +63,24 @@ jobs:
       - name: Build QwenType.exe
         run: uv run pyinstaller --noconfirm --clean qwentype.spec
 
-      - name: Report size
+      - name: Check version and rename
         run: |
           $exe = Get-Item dist\QwenType.exe
-          "Built $($exe.FullName): {0:N1} MiB" -f ($exe.Length / 1MB)
-          "### QwenType.exe: {0:N1} MiB" -f ($exe.Length / 1MB) >> $env:GITHUB_STEP_SUMMARY
+          $info = $exe.VersionInfo
+          "File version: $($info.FileVersion)  Product version: $($info.ProductVersion)"
+          if ($info.ProductVersion -ne "${{ steps.version.outputs.version }}") {
+            throw "exe ProductVersion '$($info.ProductVersion)' != '${{ steps.version.outputs.version }}'"
+          }
+          $name = "QwenType-${{ steps.version.outputs.label }}.exe"
+          Copy-Item $exe "dist\$name"
+          "Built ${name}: {0:N1} MiB" -f ($exe.Length / 1MB)
+          "### ${name}: {0:N1} MiB (version ${{ steps.version.outputs.version }})" -f ($exe.Length / 1MB) >> $env:GITHUB_STEP_SUMMARY
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: QwenType-${{ github.sha }}
-          path: dist/QwenType.exe
+          name: QwenType-${{ steps.version.outputs.label }}
+          path: dist/QwenType-${{ steps.version.outputs.label }}.exe
           if-no-files-found: error
 
   release:
@@ -64,11 +93,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: QwenType-${{ github.sha }}
+          name: QwenType-${{ needs.build.outputs.label }}
           path: dist
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/QwenType.exe
+          files: dist/QwenType-${{ needs.build.outputs.label }}.exe
           generate_release_notes: true

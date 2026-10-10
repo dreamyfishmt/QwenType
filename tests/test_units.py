@@ -21,7 +21,7 @@ class SettingsTest(unittest.TestCase):
 
     def test_defaults(self):
         s = Settings()
-        self.assertEqual(s.language, "zh-CN")
+        self.assertEqual(s.language, "")  # auto-detect: no language parameter
         self.assertEqual(s.ws_url, "ws://127.0.0.1:8907/transcribe-streaming")
         self.assertEqual(s.max_record_seconds, 60.0)
 
@@ -64,14 +64,46 @@ class SettingsTest(unittest.TestCase):
             p.write_text('{"settings_version": 2, "final_timeout_seconds": 10.0}', encoding="utf-8")
             self.assertEqual(Settings.load(p).final_timeout_seconds, 10.0)
 
+    def test_language_defaults_to_auto_detect(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            # Older files saved the old zh-CN default whether or not the user chose it.
+            for version in ("", '"settings_version": 2, '):
+                p.write_text('{' + version + '"language": "zh-CN"}', encoding="utf-8")
+                self.assertEqual(Settings.load(p).language, "")
+            p.write_text('{"settings_version": 2, "language": "en"}', encoding="utf-8")
+            self.assertEqual(Settings.load(p).language, "en")
+            # From v3 on, a saved language is an explicit choice and is kept.
+            Settings(language="zh-CN").save(p)
+            self.assertEqual(Settings.load(p).language, "zh-CN")
+            Settings().save(p)
+            self.assertEqual(Settings.load(p).language, "")
+
+    def test_capsule_blur_off_by_default(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            self.assertFalse(Settings().capsule_blur)
+            # v1/v2 files always stored the old default (true); there was no UI for it.
+            p.write_text('{"settings_version": 2, "capsule_blur": true}', encoding="utf-8")
+            self.assertFalse(Settings.load(p).capsule_blur)
+            Settings(capsule_blur=True).save(p)  # from v3 on, true is a deliberate choice
+            self.assertTrue(Settings.load(p).capsule_blur)
+
+    def test_reads_utf8_bom(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            p.write_bytes(b"\xef\xbb\xbf" + '{"capsule_blur": true, "language": "en"}'.encode())
+            s = Settings.load(p)
+            self.assertEqual(s.language, "en")
+
     def test_bad_file(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "settings.json"
             p.write_text("{not json", encoding="utf-8")
-            self.assertEqual(Settings.load(p).language, "zh-CN")
+            self.assertEqual(Settings.load(p).language, "")
             p.write_text('{"language": "xx", "max_record_seconds": "a", "llm_enabled": true}', encoding="utf-8")
             s = Settings.load(p)
-            self.assertEqual((s.language, s.max_record_seconds, s.llm_enabled), ("zh-CN", 60.0, True))
+            self.assertEqual((s.language, s.max_record_seconds, s.llm_enabled), ("", 60.0, True))
 
 
 class AsrUrlTest(unittest.TestCase):

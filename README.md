@@ -9,8 +9,9 @@ QwenType is a tray-only app for Windows 10/11. While you hold **Right Ctrl**, it
 shows the live transcript in a small capsule at the bottom of the screen. When you release the key, the text is typed
 into the focused app. Shortcuts that use Right Ctrl (Ctrl+C, …) keep working and never start a recording.
 
-- Default language: Simplified Chinese (zh-CN). Mixed Chinese–English speech works, and English words stay in
-  Latin script. Change it under **Language** in the tray menu (Auto-detect, English, 简体中文, 繁體中文, 日本語, 한국어).
+- Default language: Auto-detect. QwenType sends no `language` parameter and the model detects the language of
+  each utterance. To force one, pick it under **Language** in the tray menu (English, 简体中文, 繁體中文, 日本語,
+  한국어); 简体中文 also handles mixed Chinese–English speech, with English words kept in Latin script.
 - Optional **LLM Refinement**: an OpenAI-compatible model fixes obvious recognition errors (配森 → Python,
   杰森 → JSON) and nothing else. If it fails or rewrites too much, the unrefined text is used.
 - Settings are stored in `%APPDATA%\QwenType\settings.json`, with the server token and the LLM API key encrypted by
@@ -120,7 +121,7 @@ Open **ASR Server…** in the tray menu:
 `https://`, same host and port), so a wrong token shows up before the first recording.
 
 Other options in `%APPDATA%\QwenType\settings.json` (edit while QwenType isn't running): `max_record_seconds`
-(default 60), `ready_timeout_seconds` (5), `final_timeout_seconds` (30), `capsule_blur` and `clipboard_apps`.
+(default 60), `ready_timeout_seconds` (5), `final_timeout_seconds` (30), `capsule_blur` (default `false`) and `clipboard_apps`.
 `clipboard_apps` lists process names such as `"mstsc.exe"` that drop typed Unicode input, so text for them is always
 pasted instead. If no final result arrives within `final_timeout_seconds`, the last partial result is used.
 
@@ -141,7 +142,9 @@ files and the final exe size. To start QwenType automatically, use **Start with 
 Unit tests: `uv run -m unittest discover -s tests -t .`
 
 GitHub Actions (`.github/workflows/build.yml`) runs the tests and builds `QwenType.exe` on Windows for every push and
-pull request; the exe is attached as a workflow artifact. Pushing a `v*` tag also publishes it as a GitHub release.
+pull request; the exe is attached as a workflow artifact (`QwenType-<version>-<commit>.exe`). Pushing a `v*` tag, e.g.
+`v1.2.3`, builds with that version (file properties, tray tooltip and log) and publishes `QwenType-v1.2.3.exe` as a
+GitHub release.
 
 ## Elevated (administrator) windows
 

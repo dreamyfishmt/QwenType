@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+from . import __version__
 from .settings import LANGUAGES, Settings
 
 
@@ -135,7 +136,7 @@ class Tray(QObject):
         self.autostart_action.blockSignals(False)
 
     def _update_tooltip(self) -> None:
-        self.icon.setToolTip(f"QwenType — ASR: {self._status}\nHold Right Ctrl to dictate")
+        self.icon.setToolTip(f"QwenType {__version__} — ASR: {self._status}\nHold Right Ctrl to dictate")
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:

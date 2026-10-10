@@ -22,8 +22,9 @@ log = logging.getLogger(__name__)
 APP_NAME = "QwenType"
 
 DEFAULT_WS_URL = "ws://127.0.0.1:8907/transcribe-streaming"
-DEFAULT_LANGUAGE = "zh-CN"
-SETTINGS_VERSION = 2
+# "" = auto-detect: no `language` parameter is sent unless the user picks one in the tray menu.
+DEFAULT_LANGUAGE = ""
+SETTINGS_VERSION = 3
 
 # In-memory field -> JSON key of its DPAPI-protected copy.
 SECRET_FIELDS = {"asr_token": "asr_token_dpapi", "llm_api_key": "llm_api_key_dpapi"}
@@ -106,7 +107,9 @@ class Settings:
     unicode_max_chars: int = 200
     # Process names (e.g. "mstsc.exe") that drop KEYEVENTF_UNICODE input: always paste.
     clipboard_apps: list[str] = field(default_factory=list)
-    capsule_blur: bool = True
+    # Acrylic blur behind the capsule. Off by default: Windows draws the blur and its tint over the
+    # whole window rectangle (SetWindowRgn doesn't clip it), which shows as a dark box around the pill.
+    capsule_blur: bool = False
 
     llm_enabled: bool = False
     llm_base_url: str = "https://api.openai.com/v1"
@@ -130,7 +133,8 @@ class Settings:
         path = path or settings_path()
         s = cls()
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            # utf-8-sig: files saved by Notepad or PowerShell 5.1 may start with a BOM.
+            raw = json.loads(path.read_text(encoding="utf-8-sig"))
         except FileNotFoundError:
             return s
         except (OSError, ValueError) as e:
@@ -160,10 +164,20 @@ class Settings:
         if s.language not in {code for _, code in LANGUAGES}:
             s.language = DEFAULT_LANGUAGE
         version = raw.get("settings_version")
-        if not isinstance(version, int) or version < 2:
+        if not isinstance(version, int):
+            version = 1
+        if version < 2:
             # v1 stored the old 10 s default explicitly; move it to the new default.
             if s.final_timeout_seconds == 10.0:
                 s.final_timeout_seconds = cls.final_timeout_seconds
+        if version < 3:
+            # v1/v2 saved the old zh-CN default even when the user never chose a language;
+            # it can't be told apart from an explicit choice, so fall back to auto-detect.
+            if s.language == "zh-CN":
+                s.language = DEFAULT_LANGUAGE
+            # Same for capsule_blur=true (there was no UI for it): use the new default.
+            if s.capsule_blur:
+                s.capsule_blur = cls.capsule_blur
         s.settings_version = SETTINGS_VERSION
         for name, key in SECRET_FIELDS.items():
             blob = raw.get(key)

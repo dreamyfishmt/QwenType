@@ -26,7 +26,7 @@ from .dialogs import AsrServerDialog, LlmSettingsDialog
 from .hotkey import RightCtrlHook
 from .injector import InjectionError, inject_text
 from .qtasync import run_async
-from .settings import Settings, settings_dir
+from .settings import Settings, settings_dir, settings_path
 from .tray import Tray, app_icon
 
 log = logging.getLogger("qwentype")
@@ -460,6 +460,13 @@ def main(argv: list[str] | None = None) -> int:
     if not QSystemTrayIcon.isSystemTrayAvailable():
         log.warning("No system tray available")
 
-    controller = Controller(app, Settings.load())
+    settings = Settings.load()
+    if not settings_path().exists():
+        # Write the defaults once so the file is there to find and edit.
+        try:
+            settings.save()
+        except OSError as e:
+            log.warning("Could not write default settings: %s", e)
+    controller = Controller(app, settings)
     controller.start()
     return app.exec()

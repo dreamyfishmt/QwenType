@@ -8,8 +8,8 @@ QwenType 是一个只驻留在系统托盘的 Windows 10/11 应用。按住**右
 [Qwen3-ASR 服务](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm)，并在屏幕底部的小胶囊窗口里显示实时识别结果。
 松开按键后，文字会输入到当前焦点所在的应用。用到右 Ctrl 的快捷键（Ctrl+C 等）照常可用，不会触发录音。
 
-- 默认语言为简体中文（zh-CN）。支持中英混说，英文单词保持英文拼写。可在托盘菜单 **Language** 中切换
-  （自动检测、English、简体中文、繁體中文、日本語、한국어）。
+- 默认语言为自动检测：QwenType 不发送 `language` 参数，由模型逐段识别语言。如需固定语言，在托盘菜单
+  **Language** 中选择（English、简体中文、繁體中文、日本語、한국어）；选简体中文时也支持中英混说，英文单词保持英文拼写。
 - 可选的 **LLM 纠错**（LLM Refinement）：用兼容 OpenAI 接口的模型只修正明显的识别错误（配森 → Python、杰森 → JSON），
   不做其他改动。调用失败或改动过大时，直接使用未纠错的原文。
 - 设置保存在 `%APPDATA%\QwenType\settings.json`，服务端 token 和 LLM API Key 用 Windows DPAPI 加密。日志位于
@@ -111,7 +111,7 @@ CPU 服务器只在每段话的前 20 秒发送实时中间结果，最终结果
 token 填错会立刻提示，而不是等到录音时才失败。
 
 `%APPDATA%\QwenType\settings.json` 中的其他选项（请在 QwenType 未运行时编辑）：`max_record_seconds`（默认 60）、
-`ready_timeout_seconds`（5）、`final_timeout_seconds`（30）、`capsule_blur` 和 `clipboard_apps`。`clipboard_apps`
+`ready_timeout_seconds`（5）、`final_timeout_seconds`（30）、`capsule_blur`（默认 `false`）和 `clipboard_apps`。`clipboard_apps`
 列出会丢失 Unicode 键入的进程名（如 `"mstsc.exe"`），对这些程序始终改用粘贴方式输入。如果在 `final_timeout_seconds`
 内没有收到最终结果，则使用最后一次的中间结果。
 
@@ -132,7 +132,8 @@ token 填错会立刻提示，而不是等到录音时才失败。
 单元测试：`uv run -m unittest discover -s tests -t .`
 
 GitHub Actions（`.github/workflows/build.yml`）会在每次 push 和 pull request 时在 Windows 上运行测试并构建
-`QwenType.exe`，exe 作为 workflow artifact 提供下载。推送 `v*` 标签时还会把它发布为 GitHub Release。
+`QwenType.exe`，exe 作为 workflow artifact 提供下载（`QwenType-<版本>-<提交>.exe`）。推送 `v*` 标签（如 `v1.2.3`）时，
+会用这个版本号构建（写入文件属性、托盘提示和日志），并把 `QwenType-v1.2.3.exe` 发布为 GitHub Release。
 
 ## 管理员权限窗口
 
