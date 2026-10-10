@@ -39,8 +39,15 @@ if IS_WINDOWS:
     user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
     user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
     user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
-    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
-                                    ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
     user32.SetWindowPos.restype = wintypes.BOOL
     user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HANDLE, wintypes.BOOL]
     user32.SetWindowRgn.restype = ctypes.c_int
@@ -52,8 +59,12 @@ if IS_WINDOWS:
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
-                                                     ctypes.POINTER(wintypes.DWORD)]
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
     kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
 
 
@@ -81,6 +92,7 @@ def acquire_single_instance() -> bool:
 
 # --- keyboard ----------------------------------------------------------------
 
+
 def is_key_down(vk: int) -> bool:
     if not IS_WINDOWS:
         return False
@@ -88,6 +100,7 @@ def is_key_down(vk: int) -> bool:
 
 
 # --- foreground window -------------------------------------------------------
+
 
 def foreground_window_center() -> tuple[int, int] | None:
     """Center of the foreground window in physical screen pixels."""
@@ -186,8 +199,9 @@ def enable_blur_behind(hwnd: int, tint_abgr: int = 0x99201C1A) -> bool:
     fn.restype = wintypes.BOOL
     for state in (ACCENT_ENABLE_ACRYLICBLURBEHIND, ACCENT_ENABLE_BLURBEHIND):
         accent = _AccentPolicy(state, 2, tint_abgr, 0)
-        data = _WindowCompositionAttribData(WCA_ACCENT_POLICY, ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p),
-                                            ctypes.sizeof(accent))
+        data = _WindowCompositionAttribData(
+            WCA_ACCENT_POLICY, ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p), ctypes.sizeof(accent)
+        )
         if fn(hwnd, ctypes.byref(data)):
             return True
     return False
@@ -203,6 +217,7 @@ def set_round_region(hwnd: int, width: int, height: int, radius: int) -> None:
 
 
 # --- autostart ---------------------------------------------------------------
+
 
 def autostart_command() -> str:
     """Command line used for the Run key."""

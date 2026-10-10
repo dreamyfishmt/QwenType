@@ -4,10 +4,19 @@
 
 Hold Right Ctrl, speak, release — local Qwen3-ASR voice typing for Windows.
 
+![QwenType: hold Right Ctrl, the capsule shows the live transcript, release and the text is typed](docs/capsule.gif)
+
 QwenType is a tray-only app for Windows 10/11. While you hold **Right Ctrl**, it streams your microphone to a
 [Qwen3-ASR server](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm) on your PC or your own server and
 shows the live transcript in a small capsule at the bottom of the screen. When you release the key, the text is typed
 into the focused app. Shortcuts that use Right Ctrl (Ctrl+C, …) keep working and never start a recording.
+
+- **Hotkey**: Right Ctrl by default. Under **Hotkey** in the tray menu, pick Right Alt / AltGr, Right Shift,
+  Caps Lock, Scroll Lock, Pause or a mouse side button instead (Caps Lock, Scroll Lock, Pause and the side buttons are
+  then reserved for QwenType and lose their usual function). Turn on **Tap to start, tap to stop** to dictate without
+  holding the key. **Esc** cancels the current recording in either mode.
+- **Recent** in the tray menu lists the last 10 transcripts; click one to copy it. They are kept in memory only.
+  If typing fails, the text is copied to the clipboard so it isn't lost.
 
 - Default language: Auto-detect. QwenType sends no `language` parameter and the model detects the language of
   each utterance. To force one, pick it under **Language** in the tray menu (English, 简体中文, 繁體中文, 日本語,
@@ -87,7 +96,7 @@ Follow [CPU deployment](https://github.com/dreamyfishmt/fast-qwen-asr-inference-
 README (`compose.cpu.yaml`, `.env.cpu.example`). The CPU image **requires** `API_TOKEN`
 ([Authentication](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#authentication); generate one with
 `openssl rand -hex 32`). With a domain and `--profile tls`, Caddy provides HTTPS automatically. Then, in QwenType's
-**ASR Server…** dialog, fill in:
+**Settings…** dialog (tab **ASR Server**), fill in:
 
 - **WebSocket URL**: `wss://your-domain/transcribe-streaming` (HTTPS via Caddy, recommended) or
   `ws://SERVER_IP:8907/transcribe-streaming` (unencrypted, trusted networks only)
@@ -107,7 +116,7 @@ The first tray menu item shows the server state: `ASR: ready`, `ASR: loading_mod
 
 ## Configure the server connection
 
-Open **ASR Server…** in the tray menu:
+Open **Settings…** in the tray menu; the **ASR Server** tab has:
 
 - **WebSocket URL**: default `ws://127.0.0.1:8907/transcribe-streaming`; use `wss://…` for a server behind HTTPS.
 - **API Token**: the server's `API_TOKEN`, sent as `Authorization: Bearer <token>` and stored encrypted with
@@ -120,10 +129,24 @@ Open **ASR Server…** in the tray menu:
 **Test** checks `GET /ready` and verifies the token against `GET /health` (`ws://` → `http://`, `wss://` →
 `https://`, same host and port), so a wrong token shows up before the first recording.
 
-Other options in `%APPDATA%\QwenType\settings.json` (edit while QwenType isn't running): `max_record_seconds`
-(default 60), `ready_timeout_seconds` (5), `final_timeout_seconds` (30), `capsule_blur` (default `false`) and `clipboard_apps`.
-`clipboard_apps` lists process names such as `"mstsc.exe"` that drop typed Unicode input, so text for them is always
-pasted instead. If no final result arrives within `final_timeout_seconds`, the last partial result is used.
+The **LLM Refinement** tab has the API base URL, key, model and timeout (turn refinement on under **LLM Refinement**
+in the tray menu). The **Advanced** tab has:
+
+| Option | Default | |
+|---|---|---|
+| Max recording | 60 s | Recording stops automatically after this long. |
+| Server ready timeout | 5 s | How long to wait for the server to accept a new stream. |
+| Final result timeout | 30 s | How long to wait for the final result after release; then the last partial result is used. |
+| Paste text longer than | 200 characters | Longer text is pasted via the clipboard instead of typed. |
+| Always paste in | (none) | Process names such as `mstsc.exe` that drop typed Unicode input, so text for them is always pasted. |
+| Recent transcripts | 10 | Entries in the tray's **Recent** menu; `Off` disables it. |
+| Copy the text to the clipboard when typing fails | on | |
+| Blur behind the capsule | off | Windows draws the acrylic blur over the whole window rectangle, so it can show as a box. |
+
+**Open Settings Folder** opens `%APPDATA%\QwenType`, which also has the log. The same options are in `settings.json`
+(`max_record_seconds`, `ready_timeout_seconds`, `final_timeout_seconds`, `unicode_max_chars`, `clipboard_apps`,
+`history_size`, `copy_on_failure`, `capsule_blur`, `hotkey`, `hotkey_mode`); edit the file only while QwenType isn't
+running.
 
 ## Run and build
 
@@ -134,15 +157,25 @@ pasted instead. If no final result arrives within `final_timeout_seconds`, the l
 .\build.ps1 build     # uv run pyinstaller qwentype.spec -> dist\QwenType.exe (windowed, single file, trimmed Qt)
 .\build.ps1 install   # copies the exe to %LOCALAPPDATA%\Programs\QwenType and adds a "QwenType" Start Menu shortcut
 .\build.ps1 clean     # removes build\, dist\ and __pycache__
+.\build.ps1 check     # ruff, pyright and the unit tests (what CI runs)
 ```
 
 If `upx` is on `PATH`, the build uses it. At the end, the build prints the excluded modules, the dropped Qt
 files and the final exe size. To start QwenType automatically, use **Start with Windows** in the tray menu.
 
-Unit tests: `uv run -m unittest discover -s tests -t .`
+Development checks (all in the `dev` dependency group):
 
-GitHub Actions (`.github/workflows/build.yml`) runs the tests and builds `QwenType.exe` on Windows for every push and
-pull request; the exe is attached as a workflow artifact (`QwenType-<version>-<commit>.exe`). Pushing a `v*` tag, e.g.
+```powershell
+uv run -m unittest discover -s tests -t .   # unit tests
+uv run ruff check                           # lint
+uv run ruff format                          # format (CI runs `ruff format --check`)
+uv run pyright                              # type check
+```
+
+`docs/capsule.gif` is rendered from the real capsule code by `uv run python scripts/make_capsule_gif.py`.
+
+GitHub Actions (`.github/workflows/build.yml`) runs ruff and pyright on Linux, and runs the tests and builds
+`QwenType.exe` on Windows for every push and pull request; the exe is attached as a workflow artifact (`QwenType-<version>-<commit>.exe`). Pushing a `v*` tag, e.g.
 `v1.2.3`, builds with that version (file properties, tray tooltip and log) and publishes `QwenType-v1.2.3.exe` as a
 GitHub release.
 
@@ -160,3 +193,14 @@ variant, for example with another hotkey, ASR server or platform, edit that prom
 
 Thanks to [yetone/voice-input-src](https://github.com/yetone/voice-input-src), whose client prompt this project's
 prompt is based on.
+
+## License
+
+Copyright (c) 2026 dreamyfishmt
+
+QwenType is free software: you can redistribute it and/or modify it under the terms of the
+[GNU Affero General Public License](LICENSE) as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version (`AGPL-3.0-or-later`). It is distributed WITHOUT ANY WARRANTY; see the
+license for details.
+
+Earlier versions were released under the MIT License; copies obtained under those terms remain available under MIT.

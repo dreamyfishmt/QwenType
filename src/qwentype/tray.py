@@ -4,10 +4,23 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__
+from .hotkey import HOTKEYS, get_hotkey
 from .settings import LANGUAGES, Settings
+
+RECENT_LABEL_CHARS = 48
+SOURCE_URL = "https://github.com/dreamyfishmt/QwenType"
+ABOUT_TEXT = f"""<b>QwenType {{version}}</b><br>Hold a key, speak, release: local Qwen3-ASR voice typing.<br><br>
+Copyright (c) 2026 dreamyfishmt<br><br>
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.<br><br>
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+<a href="https://www.gnu.org/licenses/agpl-3.0.html">GNU Affero General Public License</a> for more details.<br><br>
+Source code: <a href="{SOURCE_URL}">{SOURCE_URL}</a>"""
 
 
 def draw_icon(size: int = 64, active: bool = False) -> QPixmap:
@@ -54,9 +67,12 @@ def app_icon() -> QIcon:
 
 class Tray(QObject):
     language_changed = Signal(str)
-    asr_server_requested = Signal()
+    hotkey_changed = Signal(str)
+    hotkey_mode_changed = Signal(str)
+    recent_selected = Signal(str)
+    recent_cleared = Signal()
+    settings_requested = Signal(str)  # page to open: "asr", "llm" or "advanced"
     llm_toggled = Signal(bool)
-    llm_settings_requested = Signal()
     autostart_toggled = Signal(bool)
     menu_opened = Signal()
     quit_requested = Signal()
@@ -66,6 +82,7 @@ class Tray(QObject):
         self._icon_idle = app_icon()
         self._icon_active = QIcon(draw_icon(64, active=True))
         self._status = "…"
+        self._hint = ""
 
         self.menu = QMenu()
         self.menu.setTitle("QwenType")
@@ -88,14 +105,36 @@ class Tray(QObject):
             lang_menu.addAction(act)
             self._lang_actions[code] = act
 
-        self.menu.addAction("ASR Server…", self.asr_server_requested.emit)
+        hotkey_menu = self.menu.addMenu("Hotkey")
+        hotkey_menu.setToolTipsVisible(True)
+        group = QActionGroup(hotkey_menu)
+        group.setExclusive(True)
+        self._hotkey_actions: dict[str, QAction] = {}
+        for hk in HOTKEYS.values():
+            act = QAction(hk.label, hotkey_menu, checkable=True)
+            act.triggered.connect(lambda _checked=False, i=hk.id: self.hotkey_changed.emit(i))
+            group.addAction(act)
+            hotkey_menu.addAction(act)
+            self._hotkey_actions[hk.id] = act
+        hotkey_menu.addSeparator()
+        self.toggle_action = QAction("Tap to start, tap to stop", hotkey_menu, checkable=True)
+        self.toggle_action.setToolTip("Toggle mode: no need to hold the key. Esc cancels a recording.")
+        self.toggle_action.toggled.connect(lambda on: self.hotkey_mode_changed.emit("toggle" if on else "hold"))
+        hotkey_menu.addAction(self.toggle_action)
+
+        self.recent_menu = self.menu.addMenu("Recent")
+        self.recent_menu.setToolTipsVisible(True)
+        self.set_recent([])
+
+        self.menu.addSeparator()
+        self.menu.addAction("Settings…", lambda: self.settings_requested.emit("asr"))
 
         llm_menu = self.menu.addMenu("LLM Refinement")
         self.llm_action = QAction("Enable", llm_menu, checkable=True)
         self.llm_action.setChecked(settings.llm_enabled)
         self.llm_action.toggled.connect(self.llm_toggled.emit)
         llm_menu.addAction(self.llm_action)
-        llm_menu.addAction("Settings…", self.llm_settings_requested.emit)
+        llm_menu.addAction("Settings…", lambda: self.settings_requested.emit("llm"))
 
         self.autostart_action = QAction("Start with Windows", self.menu, checkable=True)
         self.autostart_action.setChecked(autostart)
@@ -103,13 +142,14 @@ class Tray(QObject):
         self.menu.addAction(self.autostart_action)
 
         self.menu.addSeparator()
+        self.menu.addAction("About QwenType…", self.show_about)
         self.menu.addAction("Quit", self.quit_requested.emit)
         self.menu.aboutToShow.connect(self.menu_opened.emit)
 
         self.icon = QSystemTrayIcon(self._icon_idle)
         self.icon.setContextMenu(self.menu)
         self.icon.activated.connect(self._on_activated)
-        self._update_tooltip()
+        self.set_hotkey(settings.hotkey, settings.hotkey_mode)  # also sets the tooltip
 
     def show(self) -> None:
         self.icon.show()
@@ -125,6 +165,34 @@ class Tray(QObject):
     def set_recording(self, recording: bool) -> None:
         self.icon.setIcon(self._icon_active if recording else self._icon_idle)
 
+    def set_hotkey(self, hotkey_id: str, mode: str) -> None:
+        act = self._hotkey_actions.get(hotkey_id)
+        if act is not None:
+            act.setChecked(True)
+        self.toggle_action.blockSignals(True)
+        self.toggle_action.setChecked(mode == "toggle")
+        self.toggle_action.blockSignals(False)
+        key = get_hotkey(hotkey_id).short_name
+        self._hint = f"Tap {key} to start and stop dictation" if mode == "toggle" else f"Hold {key} to dictate"
+        self._update_tooltip()
+
+    def set_recent(self, texts: list[str], visible: bool = True) -> None:
+        """Newest first. Clicking an entry copies it to the clipboard."""
+        m = self.recent_menu
+        m.menuAction().setVisible(visible)
+        m.clear()
+        if not texts:
+            m.addAction("(empty)").setEnabled(False)
+            return
+        for text in texts:
+            one_line = " ".join(text.split())
+            label = one_line if len(one_line) <= RECENT_LABEL_CHARS else one_line[: RECENT_LABEL_CHARS - 1] + "…"
+            act = m.addAction(label.replace("&", "&&"))
+            act.setToolTip(f"Copy to clipboard:\n{text[:500]}")
+            act.triggered.connect(lambda _checked=False, t=text: self.recent_selected.emit(t))
+        m.addSeparator()
+        m.addAction("Clear", self.recent_cleared.emit)
+
     def set_llm_checked(self, checked: bool) -> None:
         self.llm_action.blockSignals(True)
         self.llm_action.setChecked(checked)
@@ -135,8 +203,11 @@ class Tray(QObject):
         self.autostart_action.setChecked(checked)
         self.autostart_action.blockSignals(False)
 
+    def show_about(self) -> None:
+        QMessageBox.about(None, "About QwenType", ABOUT_TEXT.format(version=__version__))
+
     def _update_tooltip(self) -> None:
-        self.icon.setToolTip(f"QwenType {__version__} — ASR: {self._status}\nHold Right Ctrl to dictate")
+        self.icon.setToolTip(f"QwenType {__version__} — ASR: {self._status}\n{self._hint}")
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:

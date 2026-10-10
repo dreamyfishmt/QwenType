@@ -10,7 +10,8 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QObject, Slot
+from PySide6.QtCore import QObject, Slot
+from PySide6.QtWidgets import QApplication
 from websockets.asyncio.server import serve
 from websockets.datastructures import Headers
 from websockets.http11 import Response
@@ -23,9 +24,12 @@ def _json_response(status, reason, body):
     data = json.dumps(body).encode()
     # websockets closes the TCP connection after a process_request response; say so, or the
     # HTTP client may reuse the dead keep-alive connection for its next request.
-    return Response(status, reason, Headers([("Content-Type", "application/json"),
-                                             ("Content-Length", str(len(data))),
-                                             ("Connection", "close")]), data)
+    return Response(
+        status,
+        reason,
+        Headers([("Content-Type", "application/json"), ("Content-Length", str(len(data))), ("Connection", "close")]),
+        data,
+    )
 
 
 class FakeServer:
@@ -94,7 +98,10 @@ class FakeServer:
             if data["type"] == "start":
                 self.start_msg = data
                 started = {k: data[k] for k in ("type", "format", "sample_rate_hz")} == {
-                    "type": "start", "format": "pcm_s16le", "sample_rate_hz": 16000}
+                    "type": "start",
+                    "format": "pcm_s16le",
+                    "sample_rate_hz": 16000,
+                }
                 await ws.send(json.dumps({"type": "info", "message": "language=Chinese"}))
             elif data["type"] == "stop":
                 if self.mode == "nofinal":
@@ -134,7 +141,7 @@ class Collector(QObject):
 class AsrClientTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.app = QCoreApplication.instance() or QCoreApplication([])
+        cls.app = QApplication.instance() or QApplication([])  # QApplication: other tests need widgets
         cls.runner = AsyncRunner()
 
     @classmethod
@@ -142,8 +149,15 @@ class AsrClientTest(unittest.TestCase):
         cls.runner.stop()
 
     def _session(self, port, language="zh-CN", ready_timeout=5.0, final_timeout=10.0, token="", context=""):
-        s = Qwen3StreamingSession(self.runner, f"ws://127.0.0.1:{port}/transcribe-streaming", language,
-                                  ready_timeout, final_timeout, token=token, context=context)
+        s = Qwen3StreamingSession(
+            self.runner,
+            f"ws://127.0.0.1:{port}/transcribe-streaming",
+            language,
+            ready_timeout,
+            final_timeout,
+            token=token,
+            context=context,
+        )
         c = Collector()
         s.events.audio_limit.connect(c.limit)
         s.events.ready.connect(c.ready)
@@ -253,9 +267,11 @@ class AsrClientTest(unittest.TestCase):
     def test_context_in_start_message(self):
         srv = FakeServer()
         self._utterance(srv, context="Vocabulary: Kubernetes, 张三")
+        assert srv.start_msg is not None
         self.assertEqual(srv.start_msg["context"], "Vocabulary: Kubernetes, 张三")
         srv2 = FakeServer()
         self._utterance(srv2)
+        assert srv2.start_msg is not None
         self.assertNotIn("context", srv2.start_msg)
 
     def test_server_audio_limit(self):

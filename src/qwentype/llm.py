@@ -47,7 +47,9 @@ def build_user_message(text: str, selected_language: str, detected_language: str
         f"Language detected by the ASR server: {detected_language or 'unknown'}",
     ]
     if vocabulary.strip():
-        lines.append(f"User vocabulary (preferred spellings, use only if the audio clearly meant them): {vocabulary.strip()}")
+        lines.append(
+            f"User vocabulary (preferred spellings, use only if the audio clearly meant them): {vocabulary.strip()}"
+        )
     lines.append(f"Transcript:\n{text}")
     return "\n".join(lines)
 
@@ -84,8 +86,17 @@ async def complete(base_url: str, api_key: str, model: str, messages: list[dict]
     return str(data["choices"][0]["message"]["content"] or "")
 
 
-async def refine(text: str, *, base_url: str, api_key: str, model: str, timeout: float,
-                 selected_language: str, detected_language: str, vocabulary: str = "") -> str:
+async def refine(
+    text: str,
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    timeout: float,
+    selected_language: str,
+    detected_language: str,
+    vocabulary: str = "",
+) -> str:
     """Return the refined text, or the original text on any failure."""
     started = time.monotonic()
     messages = [
@@ -100,16 +111,23 @@ async def refine(text: str, *, base_url: str, api_key: str, model: str, timeout:
     if not accept_output(text, output):
         log.info("LLM output rejected (len %d -> %d)", len(text), len(output))
         return text
-    log.info("LLM refinement done in %.2f s (%s)", time.monotonic() - started,
-             "changed" if output != text else "unchanged")
+    log.info(
+        "LLM refinement done in %.2f s (%s)", time.monotonic() - started, "changed" if output != text else "unchanged"
+    )
     return output
 
 
 async def test_connection(base_url: str, api_key: str, model: str, timeout: float = 15.0) -> str:
     """Used by the Settings dialog. Raises on failure; returns a short summary."""
     started = time.monotonic()
-    out = await complete(base_url, api_key, model, [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_user_message("我用配森写了一个杰森解析器。", "zh-CN", "Chinese")},
-    ], timeout)
+    out = await complete(
+        base_url,
+        api_key,
+        model,
+        [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": build_user_message("我用配森写了一个杰森解析器。", "zh-CN", "Chinese")},
+        ],
+        timeout,
+    )
     return f"OK ({time.monotonic() - started:.1f} s): {clean_output(out, '')[:80]}"

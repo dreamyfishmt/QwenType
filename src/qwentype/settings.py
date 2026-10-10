@@ -24,6 +24,8 @@ APP_NAME = "QwenType"
 DEFAULT_WS_URL = "ws://127.0.0.1:8907/transcribe-streaming"
 # "" = auto-detect: no `language` parameter is sent unless the user picks one in the tray menu.
 DEFAULT_LANGUAGE = ""
+DEFAULT_HOTKEY = "right_ctrl"  # see hotkey.HOTKEYS
+HOTKEY_MODES = ("hold", "toggle")  # hold to talk / tap to start, tap to stop
 SETTINGS_VERSION = 3
 
 # In-memory field -> JSON key of its DPAPI-protected copy.
@@ -69,6 +71,7 @@ def is_valid_ws_url(ws_url: str) -> bool:
 
 # --- DPAPI -------------------------------------------------------------------
 
+
 def _protect(secret: str) -> str:
     """Encrypt with DPAPI (current user) and return base64; plain base64 elsewhere."""
     data = secret.encode("utf-8")
@@ -90,6 +93,7 @@ def _unprotect(blob: str) -> str:
 
 # --- Settings ----------------------------------------------------------------
 
+
 @dataclass
 class Settings:
     settings_version: int = SETTINGS_VERSION
@@ -98,6 +102,8 @@ class Settings:
     # e.g. "Vocabulary: Kubernetes, QwenType, 张三". Empty = not sent.
     asr_context: str = ""
     language: str = DEFAULT_LANGUAGE
+    hotkey: str = DEFAULT_HOTKEY
+    hotkey_mode: str = "hold"
     max_record_seconds: float = 60.0
     ready_timeout_seconds: float = 5.0
     # CPU servers compute the final result after "stop"; a long utterance on a
@@ -110,6 +116,10 @@ class Settings:
     # Acrylic blur behind the capsule. Off by default: Windows draws the blur and its tint over the
     # whole window rectangle (SetWindowRgn doesn't clip it), which shows as a dark box around the pill.
     capsule_blur: bool = False
+    # Recent transcripts kept in memory (never written to disk) for the tray's Recent menu; 0 = off.
+    history_size: int = 10
+    # Put the text on the clipboard when typing it fails, so it isn't lost.
+    copy_on_failure: bool = True
 
     llm_enabled: bool = False
     llm_base_url: str = "https://api.openai.com/v1"
@@ -129,7 +139,7 @@ class Settings:
         return bool(self.llm_base_url.strip() and self.llm_model.strip())
 
     @classmethod
-    def load(cls, path: Path | None = None) -> "Settings":
+    def load(cls, path: Path | None = None) -> Settings:
         path = path or settings_path()
         s = cls()
         try:
@@ -163,6 +173,13 @@ class Settings:
                 setattr(s, f.name, value)
         if s.language not in {code for _, code in LANGUAGES}:
             s.language = DEFAULT_LANGUAGE
+        from .hotkey import HOTKEYS  # hotkey imports this module
+
+        if s.hotkey not in HOTKEYS:
+            s.hotkey = DEFAULT_HOTKEY
+        if s.hotkey_mode not in HOTKEY_MODES:
+            s.hotkey_mode = cls.hotkey_mode
+        s.history_size = max(0, s.history_size)
         version = raw.get("settings_version")
         if not isinstance(version, int):
             version = 1

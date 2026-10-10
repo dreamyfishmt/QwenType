@@ -34,8 +34,9 @@ class SettingsTest(unittest.TestCase):
             self.assertNotIn("llm_api_key", raw)
             self.assertNotIn("sk-secret", p.read_text(encoding="utf-8"))
             t = Settings.load(p)
-            self.assertEqual((t.language, t.llm_api_key, t.llm_model, t.max_record_seconds),
-                             ("ja", "sk-secret", "m", 30.0))
+            self.assertEqual(
+                (t.language, t.llm_api_key, t.llm_model, t.max_record_seconds), ("ja", "sk-secret", "m", 30.0)
+            )
             t.llm_api_key = ""
             t.save(p)
             self.assertNotIn("llm_api_key_dpapi", json.loads(p.read_text(encoding="utf-8")))
@@ -69,7 +70,7 @@ class SettingsTest(unittest.TestCase):
             p = Path(d) / "settings.json"
             # Older files saved the old zh-CN default whether or not the user chose it.
             for version in ("", '"settings_version": 2, '):
-                p.write_text('{' + version + '"language": "zh-CN"}', encoding="utf-8")
+                p.write_text("{" + version + '"language": "zh-CN"}', encoding="utf-8")
                 self.assertEqual(Settings.load(p).language, "")
             p.write_text('{"settings_version": 2, "language": "en"}', encoding="utf-8")
             self.assertEqual(Settings.load(p).language, "en")
@@ -89,10 +90,22 @@ class SettingsTest(unittest.TestCase):
             Settings(capsule_blur=True).save(p)  # from v3 on, true is a deliberate choice
             self.assertTrue(Settings.load(p).capsule_blur)
 
+    def test_hotkey_settings(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            s = Settings.load(p)
+            self.assertEqual((s.hotkey, s.hotkey_mode, s.history_size), ("right_ctrl", "hold", 10))
+            Settings(hotkey="mouse_back", hotkey_mode="toggle").save(p)
+            s = Settings.load(p)
+            self.assertEqual((s.hotkey, s.hotkey_mode), ("mouse_back", "toggle"))
+            p.write_text('{"hotkey": "f99", "hotkey_mode": "sticky", "history_size": -3}', encoding="utf-8")
+            s = Settings.load(p)
+            self.assertEqual((s.hotkey, s.hotkey_mode, s.history_size), ("right_ctrl", "hold", 0))
+
     def test_reads_utf8_bom(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "settings.json"
-            p.write_bytes(b"\xef\xbb\xbf" + '{"capsule_blur": true, "language": "en"}'.encode())
+            p.write_bytes(b"\xef\xbb\xbf" + b'{"capsule_blur": true, "language": "en"}')
             s = Settings.load(p)
             self.assertEqual(s.language, "en")
 
@@ -135,7 +148,7 @@ class AudioTest(unittest.TestCase):
         t = np.arange(rate) / rate
         x = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
         r = Resampler(rate)
-        out = np.concatenate([r.process(x[i:i + 960]) for i in range(0, x.size, 960)])
+        out = np.concatenate([r.process(x[i : i + 960]) for i in range(0, x.size, 960)])
         self.assertLessEqual(abs(out.size - 16000), 2)
         spec = np.abs(np.fft.rfft(out[1000:15000]))
         freq = np.argmax(spec) * 16000 / 14000
@@ -166,7 +179,7 @@ class LlmTest(unittest.TestCase):
         self.assertTrue(llm.accept_output("配森", "Python"))
         self.assertFalse(llm.accept_output("abc", ""))
         long = "这是一个比较长的句子，用来测试长度保护是否生效。" * 2
-        self.assertFalse(llm.accept_output(long, long[:len(long) // 2]))
+        self.assertFalse(llm.accept_output(long, long[: len(long) // 2]))
 
     def test_vocabulary_in_user_message(self):
         self.assertIn("QwenType", llm.build_user_message("t", "zh-CN", "Chinese", "Vocabulary: QwenType"))

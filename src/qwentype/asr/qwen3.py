@@ -124,8 +124,16 @@ async def fetch_status(http_base: str, token: str = "", timeout: float = 5.0) ->
 
 
 class Qwen3StreamingSession(AsrSession):
-    def __init__(self, runner: AsyncRunner, ws_url: str, language: str,
-                 ready_timeout: float, final_timeout: float, token: str = "", context: str = "") -> None:
+    def __init__(
+        self,
+        runner: AsyncRunner,
+        ws_url: str,
+        language: str,
+        ready_timeout: float,
+        final_timeout: float,
+        token: str = "",
+        context: str = "",
+    ) -> None:
         super().__init__()
         self._runner = runner
         self.url = build_ws_url(ws_url, language)
@@ -345,9 +353,15 @@ class Qwen3StreamingBackend(AsrBackend):
 
     def create_session(self, language: str) -> Qwen3StreamingSession:
         s = self._settings
-        return Qwen3StreamingSession(self._runner, s.ws_url, language,
-                                     s.ready_timeout_seconds, s.final_timeout_seconds,
-                                     token=s.asr_token, context=s.asr_context)
+        return Qwen3StreamingSession(
+            self._runner,
+            s.ws_url,
+            language,
+            s.ready_timeout_seconds,
+            s.final_timeout_seconds,
+            token=s.asr_token,
+            context=s.asr_context,
+        )
 
     async def status(self) -> str:
         return await fetch_status(self._settings.http_base, self._settings.asr_token)
