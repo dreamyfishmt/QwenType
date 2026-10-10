@@ -8,8 +8,8 @@ QwenType 是一个只驻留在系统托盘的 Windows 10/11 应用。按住**右
 [Qwen3-ASR 服务](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm)，并在屏幕底部的小胶囊窗口里显示实时识别结果。
 松开按键后，文字会输入到当前焦点所在的应用。用到右 Ctrl 的快捷键（Ctrl+C 等）照常可用，不会触发录音。
 
-- 默认语言为简体中文（zh-CN）。支持中英混说，英文单词保持英文拼写。可在托盘菜单 **Language** 中切换
-  （自动检测、English、简体中文、繁體中文、日本語、한국어）。
+- 默认语言为自动检测：QwenType 不发送 `language` 参数，由模型逐段识别语言。如需固定语言，在托盘菜单
+  **Language** 中选择（English、简体中文、繁體中文、日本語、한국어）；选简体中文时也支持中英混说，英文单词保持英文拼写。
 - 可选的 **LLM 纠错**（LLM Refinement）：用兼容 OpenAI 接口的模型只修正明显的识别错误（配森 → Python、杰森 → JSON），
   不做其他改动。调用失败或改动过大时，直接使用未纠错的原文。
 - 设置保存在 `%APPDATA%\QwenType\settings.json`，服务端 token 和 LLM API Key 用 Windows DPAPI 加密。日志位于

@@ -9,8 +9,9 @@ QwenType is a tray-only app for Windows 10/11. While you hold **Right Ctrl**, it
 shows the live transcript in a small capsule at the bottom of the screen. When you release the key, the text is typed
 into the focused app. Shortcuts that use Right Ctrl (Ctrl+C, …) keep working and never start a recording.
 
-- Default language: Simplified Chinese (zh-CN). Mixed Chinese–English speech works, and English words stay in
-  Latin script. Change it under **Language** in the tray menu (Auto-detect, English, 简体中文, 繁體中文, 日本語, 한국어).
+- Default language: Auto-detect. QwenType sends no `language` parameter and the model detects the language of
+  each utterance. To force one, pick it under **Language** in the tray menu (English, 简体中文, 繁體中文, 日本語,
+  한국어); 简体中文 also handles mixed Chinese–English speech, with English words kept in Latin script.
 - Optional **LLM Refinement**: an OpenAI-compatible model fixes obvious recognition errors (配森 → Python,
   杰森 → JSON) and nothing else. If it fails or rewrites too much, the unrefined text is used.
 - Settings are stored in `%APPDATA%\QwenType\settings.json`, with the server token and the LLM API key encrypted by

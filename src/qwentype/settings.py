@@ -22,8 +22,9 @@ log = logging.getLogger(__name__)
 APP_NAME = "QwenType"
 
 DEFAULT_WS_URL = "ws://127.0.0.1:8907/transcribe-streaming"
-DEFAULT_LANGUAGE = "zh-CN"
-SETTINGS_VERSION = 2
+# "" = auto-detect: no `language` parameter is sent unless the user picks one in the tray menu.
+DEFAULT_LANGUAGE = ""
+SETTINGS_VERSION = 3
 
 # In-memory field -> JSON key of its DPAPI-protected copy.
 SECRET_FIELDS = {"asr_token": "asr_token_dpapi", "llm_api_key": "llm_api_key_dpapi"}
@@ -160,10 +161,17 @@ class Settings:
         if s.language not in {code for _, code in LANGUAGES}:
             s.language = DEFAULT_LANGUAGE
         version = raw.get("settings_version")
-        if not isinstance(version, int) or version < 2:
+        if not isinstance(version, int):
+            version = 1
+        if version < 2:
             # v1 stored the old 10 s default explicitly; move it to the new default.
             if s.final_timeout_seconds == 10.0:
                 s.final_timeout_seconds = cls.final_timeout_seconds
+        if version < 3:
+            # v1/v2 saved the old zh-CN default even when the user never chose a language;
+            # it can't be told apart from an explicit choice, so fall back to auto-detect.
+            if s.language == "zh-CN":
+                s.language = DEFAULT_LANGUAGE
         s.settings_version = SETTINGS_VERSION
         for name, key in SECRET_FIELDS.items():
             blob = raw.get(key)
