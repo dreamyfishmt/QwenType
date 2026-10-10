@@ -79,6 +79,23 @@ class SettingsTest(unittest.TestCase):
             Settings().save(p)
             self.assertEqual(Settings.load(p).language, "")
 
+    def test_capsule_blur_off_by_default(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            self.assertFalse(Settings().capsule_blur)
+            # v1/v2 files always stored the old default (true); there was no UI for it.
+            p.write_text('{"settings_version": 2, "capsule_blur": true}', encoding="utf-8")
+            self.assertFalse(Settings.load(p).capsule_blur)
+            Settings(capsule_blur=True).save(p)  # from v3 on, true is a deliberate choice
+            self.assertTrue(Settings.load(p).capsule_blur)
+
+    def test_reads_utf8_bom(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            p.write_bytes(b"\xef\xbb\xbf" + '{"capsule_blur": true, "language": "en"}'.encode())
+            s = Settings.load(p)
+            self.assertEqual(s.language, "en")
+
     def test_bad_file(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "settings.json"

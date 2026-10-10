@@ -111,7 +111,7 @@ CPU 服务器只在每段话的前 20 秒发送实时中间结果，最终结果
 token 填错会立刻提示，而不是等到录音时才失败。
 
 `%APPDATA%\QwenType\settings.json` 中的其他选项（请在 QwenType 未运行时编辑）：`max_record_seconds`（默认 60）、
-`ready_timeout_seconds`（5）、`final_timeout_seconds`（30）、`capsule_blur` 和 `clipboard_apps`。`clipboard_apps`
+`ready_timeout_seconds`（5）、`final_timeout_seconds`（30）、`capsule_blur`（默认 `false`）和 `clipboard_apps`。`clipboard_apps`
 列出会丢失 Unicode 键入的进程名（如 `"mstsc.exe"`），对这些程序始终改用粘贴方式输入。如果在 `final_timeout_seconds`
 内没有收到最终结果，则使用最后一次的中间结果。
 

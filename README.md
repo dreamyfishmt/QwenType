@@ -121,7 +121,7 @@ Open **ASR Server…** in the tray menu:
 `https://`, same host and port), so a wrong token shows up before the first recording.
 
 Other options in `%APPDATA%\QwenType\settings.json` (edit while QwenType isn't running): `max_record_seconds`
-(default 60), `ready_timeout_seconds` (5), `final_timeout_seconds` (30), `capsule_blur` and `clipboard_apps`.
+(default 60), `ready_timeout_seconds` (5), `final_timeout_seconds` (30), `capsule_blur` (default `false`) and `clipboard_apps`.
 `clipboard_apps` lists process names such as `"mstsc.exe"` that drop typed Unicode input, so text for them is always
 pasted instead. If no final result arrives within `final_timeout_seconds`, the last partial result is used.
 
