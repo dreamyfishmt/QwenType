@@ -6,7 +6,7 @@ from unittest import mock
 
 import numpy as np
 
-from qwentype import editlog, llm
+from qwentype import corrections, editlog, llm
 from qwentype.asr.qwen3 import auth_headers, build_ws_url, describe_close, is_local_url, parse_max_duration
 from qwentype.audio import CHUNK_BYTES, Resampler, rms_level, to_pcm16
 from qwentype.injector import utf16_units
@@ -49,12 +49,14 @@ class SettingsTest(unittest.TestCase):
     def test_asr_token_and_context(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "settings.json"
-            Settings(asr_token="tok-123", asr_context="Vocabulary: QwenType").save(p)
+            Settings(asr_token="tok-123", asr_context="QwenType\n张三", asr_corrections="配森 -> Python").save(p)
             text = p.read_text(encoding="utf-8")
             self.assertNotIn("tok-123", text)
             self.assertIn("asr_token_dpapi", text)
             t = Settings.load(p)
-            self.assertEqual((t.asr_token, t.asr_context), ("tok-123", "Vocabulary: QwenType"))
+            self.assertEqual(
+                (t.asr_token, t.asr_context, t.asr_corrections), ("tok-123", "QwenType\n张三", "配森 -> Python")
+            )
             t.asr_token = ""
             t.save(p)
             self.assertEqual(Settings.load(p).asr_token, "")
@@ -215,6 +217,8 @@ class LlmTest(unittest.TestCase):
     def test_vocabulary_in_user_message(self):
         self.assertIn("QwenType", llm.build_user_message("t", "zh-CN", "Chinese", "Vocabulary: QwenType"))
         self.assertNotIn("vocabulary", llm.build_user_message("t", "zh-CN", "Chinese", "").lower())
+        msg = llm.build_user_message("我用酷伯内提斯", "", "Chinese", " Kubernetes\nQwenType \n")
+        self.assertIn(f"{llm.VOCABULARY_HEADING}:\nKubernetes\nQwenType\nTranscript:\n我用酷伯内提斯", msg)
 
     def test_edit_message(self):
         msg = llm.build_edit_message("我觉得可以", "改成英文", "Vocabulary: QwenType")
@@ -226,6 +230,57 @@ class LlmTest(unittest.TestCase):
     def test_clean(self):
         self.assertEqual(llm.clean_output('"你好"', "你好"), "你好")
         self.assertEqual(llm.clean_output("「你好」", "你好"), "你好")
+
+
+class CorrectionsTest(unittest.TestCase):
+    RULES = """
+        # comment -> ignored
+        库伯内提斯 | 酷伯内特斯 -> Kubernetes
+        cloud code => Claude Code
+        cloud → Cloud
+        AI -> A.I.
+        嗯嗯 ->
+        same -> same
+    """
+
+    def test_parse(self):
+        self.assertEqual(
+            corrections.parse_rules(self.RULES),
+            [
+                ("库伯内提斯", "Kubernetes"),
+                ("酷伯内特斯", "Kubernetes"),
+                ("cloud code", "Claude Code"),
+                ("cloud", "Cloud"),
+                ("AI", "A.I."),
+                ("嗯嗯", ""),
+            ],
+        )
+        self.assertEqual(corrections.parse_rules("no arrow\n|  -> x\n  a   b -> c"), [("a b", "c")])
+        self.assertEqual(corrections.invalid_lines("# ok\n\nno arrow\n -> x\na -> b\n| -> y"), [3, 4, 6])
+
+    def test_apply(self):
+        def fix(text):
+            return corrections.apply(text, self.RULES)
+
+        self.assertEqual(fix("我在用库伯内提斯和酷伯内特斯部署"), "我在用Kubernetes和Kubernetes部署")
+        # Case is ignored, spaces are flexible, the longest wrong form wins.
+        self.assertEqual(fix("用CloudCode写, 用cloud  code写, CLOUD."), "用Claude Code写, 用Claude Code写, Cloud.")
+        # Latin wrong forms only match whole words; next to CJK text there is no boundary.
+        self.assertEqual(fix("he said AI, ai和AI的"), "he said A.I., A.I.和A.I.的")
+        self.assertEqual(fix("AIM claim"), "AIM claim")
+        self.assertEqual(fix("嗯嗯好的"), "好的")
+        self.assertEqual(fix(""), "")
+        self.assertEqual(corrections.apply("cloud", ""), "cloud")
+        self.assertEqual(corrections.apply("cloud", "# nothing"), "cloud")
+
+    def test_one_pass(self):
+        # One rule's output is never rewritten by another, and a right side containing its wrong form is stable.
+        self.assertEqual(corrections.apply("a b", "a -> b\nb -> c"), "b c")
+        self.assertEqual(corrections.apply("Qwen", "qwen -> Qwen3"), "Qwen3")
+        # The first rule wins for the same wrong form.
+        self.assertEqual(corrections.apply("x", "x -> 1\nX -> 2"), "1")
+        # Regex characters in rules are literal.
+        self.assertEqual(corrections.apply("C++ and c", "c++ -> C++\n.* -> no"), "C++ and c")
 
 
 class EditLogTest(unittest.TestCase):

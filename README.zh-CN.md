@@ -19,11 +19,13 @@ QwenType 是一个只驻留在系统托盘的 Windows 10/11 应用。按住**右
   只有确认框打开期间，Enter、Esc 和 Ctrl+Z 才会被 QwenType 截获。语音编辑需要配置好 LLM（见下文），与托盘里的
   **LLM Refinement** 开关无关。
 - 托盘菜单 **Recent** 列出最近 10 条识别结果，点击即可复制。这些记录只保存在内存中。输入失败时，文字会被复制到剪贴板，不会丢失。
+- **词表**（Vocabulary），用于人名、专有术语和新词：热词让识别更倾向于你的写法，纠错规则（`错词 -> 正确词`）修正仍然识别错的词。
+  见[词表](#词表)。
 
 - 默认语言为自动检测：QwenType 不发送 `language` 参数，由模型逐段识别语言。如需固定语言，在托盘菜单
   **Language** 中选择（English、简体中文、繁體中文、日本語、한국어）；选简体中文时也支持中英混说，英文单词保持英文拼写。
 - 可选的 **LLM 整理**（LLM Refinement）：用兼容 OpenAI 接口的模型忠实整理口语：去掉多余的语气词、口吃和无意的重复，
-  修正明显识别错的词，措辞保持不变。调用失败或改动过大时，直接使用未整理的原文。
+  修正明显识别错的词（例如被识别乱的专有术语），措辞保持不变。调用失败或改动过大时，直接使用未整理的原文。
 - 设置保存在 `%APPDATA%\QwenType\settings.json`，服务端 token 和 LLM API Key 用 Windows DPAPI 加密。日志位于
   `%APPDATA%\QwenType\qwentype.log`。
 
@@ -117,8 +119,6 @@ CPU 服务器只在每段话的前 20 秒发送实时中间结果，最终结果
 - **WebSocket URL**：默认 `ws://127.0.0.1:8907/transcribe-streaming`；服务在 HTTPS 后面时用 `wss://…`。
 - **API Token**：服务端的 `API_TOKEN`，以 `Authorization: Bearer <token>` 发送，用 Windows DPAPI 加密保存。
   服务端未设置 token 时留空。
-- **Hotwords**：可选的热词上下文（即流式接口的 [`context`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#ws-transcribe-streaming)），让识别更倾向于指定的人名和术语，例如 `Vocabulary: Kubernetes, QwenType, 张三`。
-  请保持简短，每次解码都会带上它。它也会作为首选写法提供给 LLM 整理。
 
 **Test** 会检查 `GET /ready`，并用 `GET /health` 验证 token（`ws://` → `http://`，`wss://` → `https://`，主机和端口不变），
 token 填错会立刻提示，而不是等到录音时才失败。
@@ -151,6 +151,31 @@ token 填错会立刻提示，而不是等到录音时才失败。
 **Open Settings Folder** 会打开 `%APPDATA%\QwenType`，日志文件也在这里。这些选项同样保存在 `settings.json` 中
 （`max_record_seconds`、`ready_timeout_seconds`、`final_timeout_seconds`、`unicode_max_chars`、`clipboard_apps`、
 `history_size`、`copy_on_failure`、`capsule_blur`、`review_log`、`hotkey`、`hotkey_mode`）；请只在 QwenType 未运行时手动编辑该文件。
+
+## 词表
+
+**Vocabulary** 标签页（也可从托盘菜单 **Vocabulary…** 打开）用于改善人名、专有术语和模型不认识或总是识别错的新词：
+
+- **Hotwords**（热词）：你会说到的人名和术语，每行一个，也可以写几句关于话题的背景介绍。它们作为流式接口的
+  [`context`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/docs/api.md#context) 发送，让模型更倾向于这些写法；
+  LLM 整理和语音编辑也会把它们当作你的词表。服务端会在两次录音之间缓存这段上下文，所以列表长一些也没关系；只列你确实会说的词。
+- **Corrections**（纠错规则）：针对仍然识别错的词，每行一条规则：
+
+  ```text
+  # 错词 -> 正确词
+  库伯内提斯 | 酷伯内特斯 -> Kubernetes
+  cloud code -> Claude Code
+  ```
+
+  也可以用 `=>` 或 `→`；`a | b -> 正确词` 可以一次写多个错误形式；右边留空表示删除错词。匹配不区分大小写，
+  错词中的空格也能匹配没有空格或多个空格（`cloud code` 能匹配 "CloudCode"）；错词以英文字母或数字开头或结尾时，
+  该端只匹配完整单词。所有规则一次性应用（较长的错词优先），作用于实时文字、最终结果和语音编辑指令，并在 LLM 整理之前执行。
+  建议同时把正确写法加入 **Hotwords**，让模型一开始就更容易识别对。
+
+其他提高准确率的办法：开启 **LLM Refinement** 并使用能力较强的模型（它认识许多新术语，也会拿到你的热词）；用 GPU 镜像
+（Qwen3-ASR-1.7B）而不是 CPU 镜像（0.6B）；在 CPU 服务器上设置 `STREAM_FINAL_REUSE_PARTIAL=false`，让最终结果从头解码，
+而不是接着之前的中间结果继续（否则中间结果里的错误可能保留下来；代价是最终结果要多等一会儿）；如果自动检测把夹杂英文术语的中文
+识别成了其他语言，在 **Language** 中选择简体中文。
 
 ## 运行与构建
 

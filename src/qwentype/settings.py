@@ -98,9 +98,11 @@ def _unprotect(blob: str) -> str:
 class Settings:
     settings_version: int = SETTINGS_VERSION
     ws_url: str = DEFAULT_WS_URL
-    # Hotwords / context sent in the "start" message to bias recognition,
-    # e.g. "Vocabulary: Kubernetes, QwenType, 张三". Empty = not sent.
+    # Hotwords / context sent in the "start" message to bias recognition, e.g. one term per line
+    # ("Kubernetes\nQwenType\n张三") or "Vocabulary: Kubernetes, QwenType, 张三". Empty = not sent.
     asr_context: str = ""
+    # Correction rules applied to every transcript, one "wrong -> right" per line (see corrections.py).
+    asr_corrections: str = ""
     language: str = DEFAULT_LANGUAGE
     hotkey: str = DEFAULT_HOTKEY
     hotkey_mode: str = "hold"
