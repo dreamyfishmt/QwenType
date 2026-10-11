@@ -178,8 +178,11 @@ class LlmTest(unittest.TestCase):
         self.assertTrue(llm.accept_output("我用配森写杰森解析", "我用Python写JSON解析"))
         self.assertTrue(llm.accept_output("配森", "Python"))
         self.assertFalse(llm.accept_output("abc", ""))
+        filler = "嗯，那个，我觉得这个方案，呃，就是，还可以吧。"
+        self.assertTrue(llm.accept_output(filler, "我觉得这个方案还可以吧。"))  # filler removal shrinks a lot
         long = "这是一个比较长的句子，用来测试长度保护是否生效。" * 2
-        self.assertFalse(llm.accept_output(long, long[: len(long) // 2]))
+        self.assertFalse(llm.accept_output(long, long[: len(long) // 3]))  # summarized
+        self.assertFalse(llm.accept_output(long, long + long[:20]))  # grew: answered or expanded
 
     def test_vocabulary_in_user_message(self):
         self.assertIn("QwenType", llm.build_user_message("t", "zh-CN", "Chinese", "Vocabulary: QwenType"))

@@ -22,8 +22,9 @@ into the focused app. Shortcuts that use Right Ctrl (Ctrl+C, …) keep working a
 - Default language: Auto-detect. QwenType sends no `language` parameter and the model detects the language of
   each utterance. To force one, pick it under **Language** in the tray menu (English, 简体中文, 繁體中文, 日本語,
   한국어); 简体中文 also handles mixed Chinese–English speech, with English words kept in Latin script.
-- Optional **LLM Refinement**: an OpenAI-compatible model fixes obvious recognition errors (配森 → Python,
-  杰森 → JSON) and nothing else. If it fails or rewrites too much, the unrefined text is used.
+- Optional **LLM Refinement**: an OpenAI-compatible model tidies up the spoken text faithfully: it drops filler words,
+  stutters and accidental repetitions and fixes clearly misrecognized words, but keeps your wording. If it fails or
+  changes too much, the unrefined text is used.
 - Settings are stored in `%APPDATA%\QwenType\settings.json`, with the server token and the LLM API key encrypted by
   Windows DPAPI. The log is `%APPDATA%\QwenType\qwentype.log`.
 

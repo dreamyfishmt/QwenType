@@ -17,8 +17,8 @@ QwenType 是一个只驻留在系统托盘的 Windows 10/11 应用。按住**右
 
 - 默认语言为自动检测：QwenType 不发送 `language` 参数，由模型逐段识别语言。如需固定语言，在托盘菜单
   **Language** 中选择（English、简体中文、繁體中文、日本語、한국어）；选简体中文时也支持中英混说，英文单词保持英文拼写。
-- 可选的 **LLM 纠错**（LLM Refinement）：用兼容 OpenAI 接口的模型只修正明显的识别错误（配森 → Python、杰森 → JSON），
-  不做其他改动。调用失败或改动过大时，直接使用未纠错的原文。
+- 可选的 **LLM 整理**（LLM Refinement）：用兼容 OpenAI 接口的模型忠实整理口语：去掉多余的语气词、口吃和无意的重复，
+  修正明显识别错的词，措辞保持不变。调用失败或改动过大时，直接使用未整理的原文。
 - 设置保存在 `%APPDATA%\QwenType\settings.json`，服务端 token 和 LLM API Key 用 Windows DPAPI 加密。日志位于
   `%APPDATA%\QwenType\qwentype.log`。
 
@@ -113,12 +113,12 @@ CPU 服务器只在每段话的前 20 秒发送实时中间结果，最终结果
 - **API Token**：服务端的 `API_TOKEN`，以 `Authorization: Bearer <token>` 发送，用 Windows DPAPI 加密保存。
   服务端未设置 token 时留空。
 - **Hotwords**：可选的热词上下文（即流式接口的 [`context`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#ws-transcribe-streaming)），让识别更倾向于指定的人名和术语，例如 `Vocabulary: Kubernetes, QwenType, 张三`。
-  请保持简短，每次解码都会带上它。它也会作为首选写法提供给 LLM 纠错。
+  请保持简短，每次解码都会带上它。它也会作为首选写法提供给 LLM 整理。
 
 **Test** 会检查 `GET /ready`，并用 `GET /health` 验证 token（`ws://` → `http://`，`wss://` → `https://`，主机和端口不变），
 token 填错会立刻提示，而不是等到录音时才失败。
 
-**LLM Refinement** 标签页包含 API Base URL、Key、模型和超时时间（在托盘菜单 **LLM Refinement** 中开启纠错）。
+**LLM Refinement** 标签页包含 API Base URL、Key、模型和超时时间（在托盘菜单 **LLM Refinement** 中开启整理）。
 **Advanced** 标签页包含：
 
 | 选项 | 默认值 | |
