@@ -120,6 +120,9 @@ class Settings:
     history_size: int = 10
     # Put the text on the clipboard when typing it fails, so it isn't lost.
     copy_on_failure: bool = True
+    # Append each review-box session (transcript, refined text, voice edits, final text) to
+    # edits.jsonl in the settings folder. Off by default: it keeps what you dictated on disk.
+    review_log: bool = False
 
     llm_enabled: bool = False
     llm_base_url: str = "https://api.openai.com/v1"
@@ -127,6 +130,8 @@ class Settings:
     llm_timeout_seconds: float = 8.0
     # The user's own system prompt for refinement; empty = the built-in one (llm.SYSTEM_PROMPT).
     llm_system_prompt: str = ""
+    # The user's own system prompt for voice edits in the review box; empty = llm.EDIT_SYSTEM_PROMPT.
+    llm_edit_prompt: str = ""
     # Length guard: the refined text is discarded (the unrefined text is typed) when it keeps less than
     # llm_min_length_percent of the transcript or grows by more than llm_max_growth_percent.
     llm_length_guard: bool = True

@@ -13,6 +13,11 @@ QwenType 是一个只驻留在系统托盘的 Windows 10/11 应用。按住**右
 - **快捷键**：默认是右 Ctrl。可在托盘菜单 **Hotkey** 中改为右 Alt / AltGr、右 Shift、Caps Lock、Scroll Lock、Pause
   或鼠标侧键（选 Caps Lock、Scroll Lock、Pause 或鼠标侧键时，该键归 QwenType 专用，不再有原来的功能）。勾选
   **Tap to start, tap to stop** 后无需一直按住：按一下开始，再按一下结束。两种模式下都可以按 **Esc** 取消当前录音；只有在录音或等待结果期间 Esc 才会被 QwenType 截获，其他时候照常传给当前应用。
+- **确认后上屏与语音编辑**：听写时按一下 **Shift**（胶囊上会出现 *Review* 标记），松开后文字不会直接上屏，而是显示在确认框中。
+  此时再按住热键说出编辑指令，例如"改正式一点""把周三改成周四"，LLM 会按指令修改文字，可以连续改多次。按 **Enter** 上屏，
+  按 **Esc** 放弃（文字仍保留在 **Recent** 中），按 **Ctrl+Z** 撤销上一次修改。确认框从不抢焦点，文字会输入到你听写时所在的应用；
+  只有确认框打开期间，Enter、Esc 和 Ctrl+Z 才会被 QwenType 截获。语音编辑需要配置好 LLM（见下文），与托盘里的
+  **LLM Refinement** 开关无关。
 - 托盘菜单 **Recent** 列出最近 10 条识别结果，点击即可复制。这些记录只保存在内存中。输入失败时，文字会被复制到剪贴板，不会丢失。
 
 - 默认语言为自动检测：QwenType 不发送 `language` 参数，由模型逐段识别语言。如需固定语言，在托盘菜单
@@ -124,9 +129,11 @@ token 填错会立刻提示，而不是等到录音时才失败。
 - **Length guard**（长度保护）：整理结果短于原文的 **Keep at least**（默认 40%），或比原文长出超过 **grow at most**（默认 +30%）
   时，丢弃整理结果，改用未整理的原文上屏。用来防止模型改写、总结或回答内容；短文本始终允许变化 6 个字符。取消勾选即不限制长度
   （只有输出为空时仍使用原文）。
-- **System prompt**：默认显示内置提示词；修改后即使用你自己的提示词，点 **Default** 恢复内置提示词，留空也表示使用内置提示词。
-  如果你的提示词要求改写、翻译或总结，请放宽或关闭长度保护。
-- **Test** 会用编辑框里的提示词发送一句示例。
+- **System prompts**：**Refinement** 子标签是整理每段识别结果用的提示词，**Voice edit** 子标签是确认框中执行编辑指令用的提示词。
+  两者默认都显示内置提示词；修改后即使用你自己的提示词，点 **Default** 恢复当前子标签的内置提示词，留空也表示使用内置提示词。
+  如果你的整理提示词要求改写、翻译或总结，请放宽或关闭长度保护（长度保护从不作用于语音编辑）。
+- **Test** 会用整理提示词发送一句示例。
+
 **Advanced** 标签页包含：
 
 | 选项 | 默认值 | |
@@ -139,10 +146,11 @@ token 填错会立刻提示，而不是等到录音时才失败。
 | Recent transcripts | 10 | 托盘 **Recent** 菜单保留的条数；`Off` 表示关闭。 |
 | Copy the text to the clipboard when typing fails | 开 | |
 | Blur behind the capsule | 关 | Windows 会把亚克力模糊画满整个窗口矩形，可能显示成一个方框。 |
+| Keep a local log of review-box texts | 关 | 把每次确认框中的识别结果、整理结果、语音编辑和最终上屏的文字追加到设置目录的 `edits.jsonl`（未加密，删除该文件即可清除），供以后的版本从你的修改中学习。 |
 
 **Open Settings Folder** 会打开 `%APPDATA%\QwenType`，日志文件也在这里。这些选项同样保存在 `settings.json` 中
 （`max_record_seconds`、`ready_timeout_seconds`、`final_timeout_seconds`、`unicode_max_chars`、`clipboard_apps`、
-`history_size`、`copy_on_failure`、`capsule_blur`、`hotkey`、`hotkey_mode`）；请只在 QwenType 未运行时手动编辑该文件。
+`history_size`、`copy_on_failure`、`capsule_blur`、`review_log`、`hotkey`、`hotkey_mode`）；请只在 QwenType 未运行时手动编辑该文件。
 
 ## 运行与构建
 

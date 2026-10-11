@@ -2,10 +2,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
-from qwentype import llm
+from qwentype import editlog, llm
 from qwentype.asr.qwen3 import auth_headers, build_ws_url, describe_close, is_local_url, parse_max_duration
 from qwentype.audio import CHUNK_BYTES, Resampler, rms_level, to_pcm16
 from qwentype.injector import utf16_units
@@ -215,9 +216,34 @@ class LlmTest(unittest.TestCase):
         self.assertIn("QwenType", llm.build_user_message("t", "zh-CN", "Chinese", "Vocabulary: QwenType"))
         self.assertNotIn("vocabulary", llm.build_user_message("t", "zh-CN", "Chinese", "").lower())
 
+    def test_edit_message(self):
+        msg = llm.build_edit_message("我觉得可以", "改成英文", "Vocabulary: QwenType")
+        self.assertEqual(msg.splitlines()[-1], "改成英文")
+        self.assertIn("Text:\n我觉得可以", msg)
+        self.assertIn("QwenType", msg)
+        self.assertNotIn("vocabulary", llm.build_edit_message("t", "i").lower())
+
     def test_clean(self):
         self.assertEqual(llm.clean_output('"你好"', "你好"), "你好")
         self.assertEqual(llm.clean_output("「你好」", "你好"), "你好")
+
+
+class EditLogTest(unittest.TestCase):
+    def test_append_and_rotate(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "edits.jsonl"
+            record = editlog.EditRecord(asr="配森", refined="Python", final="Python 3")
+            record.edits.append({"instruction": "加上版本号", "result": "Python 3"})
+            editlog.append(record, p)
+            editlog.append(record, p)
+            lines = p.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertIn("配森", lines[0])  # not escaped
+            self.assertEqual(json.loads(lines[0])["edits"][0]["result"], "Python 3")
+            with mock.patch.object(editlog, "MAX_BYTES", 10):
+                editlog.append(record, p)
+            self.assertEqual(len(p.read_text(encoding="utf-8").splitlines()), 1)
+            self.assertEqual(len((Path(d) / "edits.1.jsonl").read_text(encoding="utf-8").splitlines()), 2)
 
 
 class InjectorTest(unittest.TestCase):

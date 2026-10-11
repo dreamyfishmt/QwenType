@@ -1,7 +1,9 @@
 """Hotkey logic, the settings dialog, the tray menu and the controller's state machine
 (with a fake ASR backend and no microphone)."""
 
+import asyncio
 import importlib
+import json
 import os
 import tempfile
 import time
@@ -17,6 +19,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
+from qwentype import editlog
 from qwentype.aio import AsyncRunner
 from qwentype.asr.base import AsrBackend, AsrSession
 from qwentype.dialogs import SettingsDialog, parse_app_list
@@ -25,6 +28,10 @@ from qwentype.hotkey import (
     LLKHF_EXTENDED,
     VK_ESCAPE,
     VK_LCONTROL,
+    VK_LSHIFT,
+    VK_RETURN,
+    VK_RSHIFT,
+    VK_Z,
     WM_KEYDOWN,
     WM_KEYUP,
     WM_XBUTTONDOWN,
@@ -47,7 +54,7 @@ def setUpModule():
 class Recorder:
     def __init__(self, hook: HotkeyHook):
         self.events: list[str] = []
-        for name in ("pressed", "released", "other_key", "escape"):
+        for name in ("pressed", "released", "other_key", "escape", "shift", "enter", "undo"):
             getattr(hook, name).connect(lambda n=name: self.events.append(n))
 
 
@@ -110,6 +117,54 @@ class HotkeyTest(unittest.TestCase):
         self.assertFalse(hook.handle_key(WM_KEYUP, VK_ESCAPE))
         self.assertEqual(rec.events, ["escape"])
 
+    def test_shift_marks_review_while_recording(self):
+        hook = HotkeyHook(get_hotkey("right_ctrl"))
+        rec = Recorder(hook)
+        self.assertFalse(hook.handle_key(WM_KEYDOWN, VK_LSHIFT))  # not recording: Shift belongs to the app
+        self.assertFalse(hook.handle_key(WM_KEYUP, VK_LSHIFT))
+        hook.handle_key(WM_KEYDOWN, 0xA3, flags=LLKHF_EXTENDED)
+        hook.capture_shift = True
+        self.assertTrue(hook.handle_key(WM_KEYDOWN, VK_LSHIFT))  # swallowed: no Ctrl+Shift layout switch
+        self.assertTrue(hook.handle_key(WM_KEYDOWN, VK_LSHIFT))  # auto-repeat
+        hook.capture_shift = False
+        self.assertTrue(hook.handle_key(WM_KEYUP, VK_LSHIFT))  # its key-up too
+        self.assertEqual(rec.events, ["pressed", "shift"])  # not a shortcut: the recording goes on
+
+    def test_right_shift_hotkey_leaves_left_shift(self):
+        hook = HotkeyHook(get_hotkey("right_shift"))
+        rec = Recorder(hook)
+        hook.capture_shift = True
+        hook.handle_key(WM_KEYDOWN, VK_RSHIFT)
+        self.assertTrue(hook.handle_key(WM_KEYDOWN, VK_LSHIFT))
+        self.assertEqual(rec.events, ["pressed", "shift"])
+
+    def test_review_keys(self):
+        hook = HotkeyHook(get_hotkey("right_ctrl"))
+        rec = Recorder(hook)
+        self.assertFalse(hook.handle_key(WM_KEYDOWN, VK_RETURN))  # box closed: Enter belongs to the app
+        self.assertFalse(hook.handle_key(WM_KEYUP, VK_RETURN))
+        hook.capture_review = True
+        self.assertTrue(hook.handle_key(WM_KEYDOWN, VK_RETURN))
+        hook.capture_review = False  # the box closed on Enter
+        self.assertTrue(hook.handle_key(WM_KEYDOWN, VK_RETURN))  # auto-repeat while still held
+        self.assertTrue(hook.handle_key(WM_KEYUP, VK_RETURN))
+        hook.capture_review = True
+        self.assertFalse(hook.handle_key(WM_KEYDOWN, VK_Z))  # plain Z
+        self.assertFalse(hook.handle_key(WM_KEYUP, VK_Z))
+        self.assertFalse(hook.handle_key(WM_KEYDOWN, VK_LCONTROL))
+        self.assertTrue(hook.handle_key(WM_KEYDOWN, VK_Z))  # Ctrl+Z
+        self.assertTrue(hook.handle_key(WM_KEYUP, VK_Z))
+        self.assertFalse(hook.handle_key(WM_KEYUP, VK_LCONTROL))
+        # Right Ctrl is the hotkey: Right Ctrl+Z is still an undo, not a shortcut for the app.
+        hook.handle_key(WM_KEYDOWN, 0xA3, flags=LLKHF_EXTENDED)
+        self.assertTrue(hook.handle_key(WM_KEYDOWN, VK_Z))
+        hook.handle_key(WM_KEYUP, VK_Z)
+        hook.handle_key(WM_KEYUP, 0xA3, flags=LLKHF_EXTENDED)
+        # AltGr+Z types a character on some layouts: not an undo.
+        hook.handle_key(WM_KEYDOWN, VK_LCONTROL, scan=ALTGR_FAKE_LCTRL_SCAN)
+        self.assertFalse(hook.handle_key(WM_KEYDOWN, VK_Z))
+        self.assertEqual(rec.events, ["enter", "undo", "pressed", "undo", "released"])
+
     def test_missed_key_up_is_recovered(self):
         hook = HotkeyHook(get_hotkey("caps_lock"))
         rec = Recorder(hook)
@@ -161,6 +216,7 @@ class SettingsDialogTest(unittest.TestCase):
             d.advanced.history_size.setValue(0)
             d.advanced.copy_on_failure.setChecked(False)
             d.advanced.capsule_blur.setChecked(True)
+            d.advanced.review_log.setChecked(True)
             d.llm.timeout.setValue(12)
             d.llm.min_length.setValue(20)
             d.llm.max_growth.setValue(150)
@@ -171,6 +227,7 @@ class SettingsDialogTest(unittest.TestCase):
         self.assertEqual((s.max_record_seconds, s.final_timeout_seconds), (120.0, 45.0))
         self.assertEqual(s.clipboard_apps, ["mstsc.exe", "vmconnect.exe"])
         self.assertEqual((s.history_size, s.copy_on_failure, s.capsule_blur), (0, False, True))
+        self.assertTrue(s.review_log)
         self.assertEqual(s.llm_timeout_seconds, 12.0)
         self.assertEqual((s.llm_length_guard, s.llm_min_length_percent, s.llm_max_growth_percent), (True, 20, 150))
 
@@ -206,6 +263,18 @@ class SettingsDialogTest(unittest.TestCase):
             d.llm.prompt.setPlainText(llm.SYSTEM_PROMPT)  # the Default button
             d._save()
             self.assertEqual(s.llm_system_prompt, "")  # stored as "use the built-in prompt"
+
+            d = SettingsDialog(s, runner, "llm")
+            self.assertEqual(d.llm.edit_prompt.toPlainText(), llm.EDIT_SYSTEM_PROMPT)
+            d.llm.edit_prompt.setPlainText("Edit as told.")
+            d._save()
+            self.assertEqual((s.llm_system_prompt, s.llm_edit_prompt), ("", "Edit as told."))
+            d = SettingsDialog(s, runner, "llm")
+            d.llm.prompts.setCurrentWidget(d.llm.edit_prompt)
+            d.llm._reset_prompt()  # Default resets the selected tab only
+            self.assertEqual(d.llm.edit_prompt.toPlainText(), llm.EDIT_SYSTEM_PROMPT)
+            d._save()
+            self.assertEqual(s.llm_edit_prompt, "")
 
             s.llm_system_prompt = "x"
             d = SettingsDialog(s, runner, "llm")
@@ -372,6 +441,173 @@ class ControllerTest(unittest.TestCase):
             self._wait_idle()
         self.assertEqual(QGuiApplication.clipboard().text(), "keep me")
         self.assertIn("text copied", self.c.capsule._text)
+
+    # -- review box ------------------------------------------------------------------
+
+    def _wait_state(self, state, timeout=3.0):
+        deadline = time.monotonic() + timeout
+        while self.c.state is not state and time.monotonic() < deadline:
+            QCoreApplication.processEvents()
+            time.sleep(0.01)
+        self.assertIs(self.c.state, state)
+
+    def _open_review(self, text="hello world"):
+        session = self._record()
+        self.assertTrue(self.c.hook.capture_shift)
+        self.c._on_shift()
+        self.c._on_released()
+        session.events.final.emit(text, "English")
+        self.assertIs(self.c.state, qmain.State.REVIEW)
+        self.assertTrue(self.c.review_box.isVisible())
+        self.assertEqual(self.c.review_box.text, text)
+        self.assertTrue(self.c.hook.capture_review)
+        self.assertTrue(self.c.hook.capture_escape)
+        self.assertFalse(self.c.hook.capture_shift)
+
+    def _instruct(self, instruction):
+        """Speak an edit instruction while the review box is open."""
+        session = self._record()
+        self.assertTrue(self.c._instruction)
+        self.assertFalse(self.c.hook.capture_shift)
+        self.c._on_released()
+        session.events.final.emit(instruction, "English")
+
+    def test_without_shift_the_text_is_typed(self):
+        session = self._record()
+        self.c._on_released()
+        with mock.patch.object(qmain, "inject_text") as inject:
+            session.events.final.emit("direct", "English")
+            self._wait_idle()
+        self.assertEqual(inject.call_args.args[0], "direct")
+        self.assertFalse(self.c.review_box.isVisible())
+
+    def test_review_enter_types_the_text(self):
+        with mock.patch.object(qmain, "inject_text") as inject:
+            self._open_review()
+            inject.assert_not_called()
+            self.c._on_enter()
+            self._wait_idle()
+        self.assertEqual(inject.call_args.args[0], "hello world")
+        self.assertFalse(self.c.review_box.isVisible())
+        self.assertFalse(self.c.hook.capture_review)
+        self.assertEqual(list(self.c._history), ["hello world"])
+
+    def test_review_escape_discards_to_recent(self):
+        with mock.patch.object(qmain, "inject_text") as inject:
+            self._open_review()
+            self.c._on_escape()
+            self.assertIs(self.c.state, qmain.State.IDLE)
+            inject.assert_not_called()
+        self.assertFalse(self.c.review_box.isVisible())
+        self.assertEqual(list(self.c._history), ["hello world"])
+
+    def test_voice_edit_needs_an_llm(self):
+        self.settings.llm_model = ""
+        self._open_review()
+        sessions = len(self.backend.sessions)
+        self.c._on_pressed()
+        self.assertIs(self.c.state, qmain.State.REVIEW)
+        self.assertEqual(len(self.backend.sessions), sessions)  # nothing recorded
+        self.assertIn("LLM", self.c.review_box.status.text())
+
+    def test_voice_edit_undo_and_enter(self):
+        self.settings.llm_model = "m"
+        calls = []
+
+        async def fake_edit(text, instruction, **kwargs):
+            calls.append((text, instruction, kwargs["system_prompt"]))
+            return f"{text} (edited)"
+
+        with mock.patch.object(qmain.llm, "edit", fake_edit), mock.patch.object(qmain, "inject_text") as inject:
+            self._open_review("draft")
+            self._instruct("make it better")
+            self._wait_state(qmain.State.REVIEW)
+            self.assertEqual(self.c.review_box.text, "draft (edited)")
+            self._instruct("again")
+            self._wait_state(qmain.State.REVIEW)
+            self.assertEqual(self.c.review_box.text, "draft (edited) (edited)")
+            self.c._on_undo()
+            self.assertEqual(self.c.review_box.text, "draft (edited)")
+            self.c._on_enter()
+            self._wait_idle()
+        self.assertEqual(calls, [("draft", "make it better", ""), ("draft (edited)", "again", "")])
+        self.assertEqual(inject.call_args.args[0], "draft (edited)")
+
+    def test_failed_edit_keeps_the_text(self):
+        self.settings.llm_model = "m"
+
+        async def fake_edit(text, instruction, **kwargs):
+            raise TimeoutError("too slow")
+
+        with mock.patch.object(qmain.llm, "edit", fake_edit):
+            self._open_review("draft")
+            self._instruct("rewrite")
+            self._wait_state(qmain.State.REVIEW)
+        self.assertEqual(self.c.review_box.text, "draft")
+        self.assertIn("Edit failed", self.c.review_box.status.text())
+
+    def test_escape_while_instructing_keeps_the_box(self):
+        self.settings.llm_model = "m"
+        self._open_review()
+        session = self._record()
+        self.c._on_escape()
+        self.assertEqual(session.calls, ["start", "cancel"])
+        self.assertIs(self.c.state, qmain.State.REVIEW)
+        self.assertTrue(self.c.review_box.isVisible())
+        self.c._on_enter()  # Enter is ignored only while an instruction is in progress
+        self._wait_idle()
+
+    def test_undo_cancels_an_instruction_in_progress(self):
+        self.settings.llm_model = "m"
+        self._open_review()
+        session = self._record()
+        self.c._on_undo()
+        self.assertEqual(session.calls, ["start", "cancel"])
+        self.assertIs(self.c.state, qmain.State.REVIEW)
+        self.assertEqual(self.c.review_box.status.text(), "Nothing to undo")
+
+    def test_enter_is_ignored_while_editing(self):
+        self.settings.llm_model = "m"
+
+        async def never(text, instruction, **kwargs):
+            await asyncio.sleep(10)
+
+        with mock.patch.object(qmain.llm, "edit", never), mock.patch.object(qmain, "inject_text") as inject:
+            self._open_review()
+            self._instruct("slowly")
+            self.assertIs(self.c.state, qmain.State.EDITING)
+            self.c._on_enter()
+            self.assertIs(self.c.state, qmain.State.EDITING)
+            inject.assert_not_called()
+            self.c._on_escape()  # cancels the edit, keeps the box
+            self.assertIs(self.c.state, qmain.State.REVIEW)
+            self.assertEqual(self.c.review_box.text, "hello world")
+
+    def test_review_mark_on_capsule(self):
+        session = self._record()
+        width = self.c.capsule._base_width()
+        self.c._on_shift()
+        self.assertGreater(self.c.capsule._base_width(), width)
+        self.c._on_escape()
+        self.assertEqual(session.calls, ["start", "cancel"])
+        self._record()
+        self.assertEqual(self.c.capsule._base_width(), width)  # cleared on the next press
+
+    def test_review_log(self):
+        path = editlog.log_path()
+        path.unlink(missing_ok=True)
+        with mock.patch.object(qmain, "inject_text"):
+            self._open_review("not logged")
+            self.c._on_enter()
+            self._wait_idle()
+            self.assertFalse(path.exists())
+            self.settings.review_log = True
+            self._open_review("logged")
+            self.c._on_escape()
+        lines = path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 1)
+        record = json.loads(lines[0])
+        self.assertEqual((record["asr"], record["final"], record["language"]), ("logged", None, "English"))
 
 
 if __name__ == "__main__":

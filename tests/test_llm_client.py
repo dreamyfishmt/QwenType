@@ -95,6 +95,22 @@ class LlmClientTest(unittest.TestCase):
         self.server.reply = "  "
         self.assertEqual(self._refine(long, min_keep=None, max_growth=None), long)  # empty output: fall back
 
+    def test_edit(self):
+        def edit(**kwargs):
+            coro = llm.edit(
+                "the text", "the instruction", base_url=self.server.url, api_key="k", model="m", timeout=5, **kwargs
+            )
+            return self.runner.submit(coro).result(10)
+
+        self.assertEqual(edit(), "the instruction")  # the fake server echoes the last line
+        self.assertEqual(edit(system_prompt="Mine."), "the instruction")
+        self.assertEqual(self.server.system_prompts, [llm.EDIT_SYSTEM_PROMPT, "Mine."])
+        self.server.reply = "a much, much longer answer than the original text was"
+        self.assertEqual(edit(), self.server.reply)  # no length guard for edits
+        self.server.reply = " "
+        with self.assertRaises(ValueError):
+            edit()
+
     def test_new_client_after_close(self):
         self._refine("first")
         self.runner.submit(llm.close_client()).result(5)
