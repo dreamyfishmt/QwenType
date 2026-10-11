@@ -57,7 +57,7 @@ class LlmClientTest(unittest.TestCase):
         self.runner.stop()
         self.server.close()
 
-    def _refine(self, text, key="k1", system_prompt=""):
+    def _refine(self, text, key="k1", system_prompt="", **limits):
         coro = llm.refine(
             text,
             base_url=self.server.url,
@@ -67,6 +67,7 @@ class LlmClientTest(unittest.TestCase):
             selected_language="",
             detected_language="English",
             system_prompt=system_prompt,
+            **limits,
         )
         return self.runner.submit(coro).result(10)
 
@@ -80,14 +81,19 @@ class LlmClientTest(unittest.TestCase):
         self.assertEqual([auth for _, auth in self.server.requests], ["Bearer k1", "Bearer k1", "Bearer k2"])
 
     def test_custom_system_prompt(self):
+        self._refine("one", system_prompt="  Summarize.  ")
+        self._refine("two", system_prompt="   ")  # blank = built-in prompt
+        self.assertEqual(self.server.system_prompts, ["Summarize.", llm.SYSTEM_PROMPT])
+
+    def test_length_guard_limits(self):
         long = "please summarize this rather long dictated sentence for me"
         self.server.reply = "summary"
-        self.assertEqual(self._refine(long), long)  # built-in prompt: the length guard rejects it
-        self.assertEqual(self._refine(long, system_prompt="  Summarize.  "), "summary")
-        self.assertEqual(self._refine(long, system_prompt="   "), long)  # blank = built-in prompt
-        self.assertEqual(self.server.system_prompts, [llm.SYSTEM_PROMPT, "Summarize.", llm.SYSTEM_PROMPT])
+        self.assertEqual(self._refine(long), long)  # default limits reject it, custom prompt or not
+        self.assertEqual(self._refine(long, system_prompt="Summarize."), long)
+        self.assertEqual(self._refine(long, min_keep=0.1), "summary")
+        self.assertEqual(self._refine(long, min_keep=None, max_growth=None), "summary")  # no limit
         self.server.reply = "  "
-        self.assertEqual(self._refine(long, system_prompt="Summarize."), long)  # empty output: fall back
+        self.assertEqual(self._refine(long, min_keep=None, max_growth=None), long)  # empty output: fall back
 
     def test_new_client_after_close(self):
         self._refine("first")

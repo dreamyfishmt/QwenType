@@ -105,6 +105,19 @@ class SettingsTest(unittest.TestCase):
             s = Settings.load(p)
             self.assertEqual((s.hotkey, s.hotkey_mode, s.history_size), ("right_ctrl", "hold", 0))
 
+    def test_llm_length_guard_settings(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            s = Settings.load(p)
+            self.assertEqual(s.llm_length_limits, (0.4, 0.3))
+            Settings(llm_min_length_percent=25, llm_max_growth_percent=200).save(p)
+            self.assertEqual(Settings.load(p).llm_length_limits, (0.25, 2.0))
+            Settings(llm_length_guard=False).save(p)
+            self.assertEqual(Settings.load(p).llm_length_limits, (None, None))
+            p.write_text('{"llm_min_length_percent": 150, "llm_max_growth_percent": -5}', encoding="utf-8")
+            s = Settings.load(p)
+            self.assertEqual((s.llm_min_length_percent, s.llm_max_growth_percent), (100, 0))
+
     def test_reads_utf8_bom(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "settings.json"
@@ -186,6 +199,17 @@ class LlmTest(unittest.TestCase):
         long = "这是一个比较长的句子，用来测试长度保护是否生效。" * 2
         self.assertFalse(llm.accept_output(long, long[: len(long) // 3]))  # summarized
         self.assertFalse(llm.accept_output(long, long + long[:20]))  # grew: answered or expanded
+
+    def test_guard_limits(self):
+        long = "这是一个比较长的句子，用来测试长度保护是否生效。" * 2  # 48 characters
+        third, longer = long[: len(long) // 3], long + long[:24]  # 33% and +50%
+        self.assertTrue(llm.accept_output(long, third, min_keep=0.3))
+        self.assertFalse(llm.accept_output(long, longer, max_growth=0.3))
+        self.assertTrue(llm.accept_output(long, longer, max_growth=0.5))
+        self.assertTrue(llm.accept_output(long, "短", min_keep=None, max_growth=None))
+        self.assertTrue(llm.accept_output(long, long * 5, min_keep=None, max_growth=None))
+        self.assertFalse(llm.accept_output(long, " ", min_keep=None, max_growth=None))  # never empty
+        self.assertTrue(llm.accept_output("配森", "Python", max_growth=0))  # short texts keep the slack
 
     def test_vocabulary_in_user_message(self):
         self.assertIn("QwenType", llm.build_user_message("t", "zh-CN", "Chinese", "Vocabulary: QwenType"))

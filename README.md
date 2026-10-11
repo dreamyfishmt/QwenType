@@ -133,11 +133,16 @@ Open **Settings…** in the tray menu; the **ASR Server** tab has:
 `https://`, same host and port), so a wrong token shows up before the first recording.
 
 The **LLM Refinement** tab has the API base URL, key, model and timeout (turn refinement on under **LLM Refinement**
-in the tray menu), and the **System prompt**. It shows the built-in prompt; edit it to make refinement do something
-else (your own prompt is then used instead), and **Default** restores the built-in one. An empty prompt also means the
-built-in one. With your own prompt, the length guard is off: the model's answer is typed even if it is much longer or
-shorter, and only an empty answer falls back to the unrefined text. **Test** sends a sample sentence with the prompt in
-the box. The **Advanced** tab has:
+in the tray menu), the length guard and the **System prompt**:
+
+- **Length guard**: the refined text is discarded and the unrefined text is typed when it keeps less than
+  **Keep at least** (default 40%) of the transcript or grows by more than **grow at most** (default +30%). This guards
+  against the model rewriting, summarizing or answering; short texts may always change by 6 characters. Uncheck it
+  to accept any length (only an empty answer still falls back to the unrefined text).
+- **System prompt**: shows the built-in prompt; edit it to make refinement do something else (your own prompt is then
+  used instead), and **Default** restores the built-in one. An empty prompt also means the built-in one. If your
+  prompt asks for rewrites, translation or summaries, loosen or turn off the length guard.
+- **Test** sends a sample sentence with the prompt in the box. The **Advanced** tab has:
 
 | Option | Default | |
 |---|---|---|

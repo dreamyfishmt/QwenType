@@ -162,6 +162,8 @@ class SettingsDialogTest(unittest.TestCase):
             d.advanced.copy_on_failure.setChecked(False)
             d.advanced.capsule_blur.setChecked(True)
             d.llm.timeout.setValue(12)
+            d.llm.min_length.setValue(20)
+            d.llm.max_growth.setValue(150)
             d._save()
             self.assertEqual(d.result(), SettingsDialog.DialogCode.Accepted)
         finally:
@@ -170,6 +172,22 @@ class SettingsDialogTest(unittest.TestCase):
         self.assertEqual(s.clipboard_apps, ["mstsc.exe", "vmconnect.exe"])
         self.assertEqual((s.history_size, s.copy_on_failure, s.capsule_blur), (0, False, True))
         self.assertEqual(s.llm_timeout_seconds, 12.0)
+        self.assertEqual((s.llm_length_guard, s.llm_min_length_percent, s.llm_max_growth_percent), (True, 20, 150))
+
+    def test_length_guard_can_be_turned_off(self):
+        s = Settings()
+        runner = AsyncRunner()
+        try:
+            d = SettingsDialog(s, runner, "llm")
+            self.assertTrue(d.llm.min_length.isEnabled())
+            d.llm.length_guard.setChecked(False)
+            self.assertFalse(d.llm.min_length.isEnabled())
+            self.assertFalse(d.llm.max_growth.isEnabled())
+            d._save()
+        finally:
+            runner.stop()
+        self.assertEqual(s.llm_length_limits, (None, None))
+        self.assertEqual((s.llm_min_length_percent, s.llm_max_growth_percent), (40, 30))  # kept for later
 
     def test_custom_system_prompt(self):
         from qwentype import llm

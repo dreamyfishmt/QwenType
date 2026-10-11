@@ -352,6 +352,7 @@ class Controller(QObject):
             self.state = State.REFINING
             self.capsule.show_status("Refining…")
             utterance = self._utterance
+            min_keep, max_growth = s.llm_length_limits
             coro = llm.refine(
                 text,
                 base_url=s.llm_base_url,
@@ -362,6 +363,8 @@ class Controller(QObject):
                 detected_language=language,
                 vocabulary=s.asr_context,
                 system_prompt=s.llm_system_prompt,
+                min_keep=min_keep,
+                max_growth=max_growth,
             )
             run_async(self.runner, coro, lambda result, error: self._on_refined(utterance, text, result, error))
         else:

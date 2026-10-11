@@ -158,13 +158,43 @@ class LlmPage(QWidget):
         self.timeout.setValue(settings.llm_timeout_seconds)
         self.timeout.setToolTip("If the model doesn't answer in time, the unrefined text is typed.")
 
+        guard_tip = (
+            "When the refined text is shorter or longer than these limits, it is discarded and the "
+            "unrefined text is typed (a guard against the model rewriting, summarizing or answering). "
+            "Short texts may always change by a few characters. Turn it off to accept any length."
+        )
+        self.length_guard = QCheckBox("Keep at least")
+        self.length_guard.setChecked(settings.llm_length_guard)
+        self.min_length = QSpinBox()
+        self.min_length.setRange(0, 100)
+        self.min_length.setSuffix(" %")
+        self.min_length.setValue(settings.llm_min_length_percent)
+        self.max_growth = QSpinBox()
+        self.max_growth.setRange(0, 1000)
+        self.max_growth.setPrefix("+")
+        self.max_growth.setSuffix(" %")
+        self.max_growth.setValue(settings.llm_max_growth_percent)
+        growth_label = QLabel("and grow at most")
+        guard_row = QHBoxLayout()
+        for w in (self.length_guard, self.min_length, growth_label, self.max_growth):
+            w.setToolTip(guard_tip)
+            guard_row.addWidget(w)
+        guard_row.addStretch(1)
+
+        def update_guard() -> None:
+            for w in (self.min_length, growth_label, self.max_growth):
+                w.setEnabled(self.length_guard.isChecked())
+
+        self.length_guard.toggled.connect(update_guard)
+        update_guard()
+
         # Shows the prompt in use, so the built-in one can be edited as a starting point.
         self.prompt = QPlainTextEdit(settings.llm_system_prompt.strip() or llm.SYSTEM_PROMPT)
         self.prompt.setTabChangesFocus(True)
         self.prompt.setMinimumHeight(160)
         self.prompt.setToolTip(
-            "What the model is told to do with each transcript. With your own prompt, its output is used "
-            "even if the length changes a lot; only an empty answer falls back to the unrefined text."
+            "What the model is told to do with each transcript. If your prompt asks for rewrites, "
+            "translation or summaries, loosen or turn off the length guard."
         )
         reset_prompt = QPushButton("Default")
         reset_prompt.setToolTip("Restore the built-in system prompt.")
@@ -179,6 +209,7 @@ class LlmPage(QWidget):
         form.addRow("API Key", self.api_key)
         form.addRow("Model", self.model)
         form.addRow("Timeout", self.timeout)
+        form.addRow("Length guard", guard_row)
 
         self.status = _status_label()
         self.test_button = QPushButton("Test")
@@ -214,6 +245,9 @@ class LlmPage(QWidget):
         settings.llm_model = self.model.text().strip()
         settings.llm_timeout_seconds = self.timeout.value()
         settings.llm_system_prompt = self.custom_prompt()
+        settings.llm_length_guard = self.length_guard.isChecked()
+        settings.llm_min_length_percent = self.min_length.value()
+        settings.llm_max_growth_percent = self.max_growth.value()
 
     def custom_prompt(self) -> str:
         """The edited prompt, or "" when it is empty or the built-in one (so later app updates of the

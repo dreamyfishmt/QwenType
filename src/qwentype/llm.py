@@ -53,16 +53,20 @@ def build_user_message(text: str, selected_language: str, detected_language: str
     return "\n".join(lines)
 
 
-def accept_output(original: str, output: str) -> bool:
-    """Guard against the model rewriting or answering: reject empty output, output that grows by more
-    than ~30% (a small absolute slack lets short inputs gain a term) and output that keeps less than
-    ~40% of the input. Dropping filler words shortens the text, so shrinking gets more room."""
+# Short inputs may always change by this many characters, so e.g. a term can still be fixed.
+LENGTH_SLACK_CHARS = 6
+
+
+def accept_output(original: str, output: str, min_keep: float | None = 0.4, max_growth: float | None = 0.3) -> bool:
+    """Guard against the model rewriting, summarizing or answering: reject empty output, output that
+    keeps less than `min_keep` of the input and output that grows by more than `max_growth` (ratios;
+    None = no limit). Dropping filler words shortens the text, so shrinking gets more room by default."""
     if not output.strip():
         return False
     n, m = len(original), len(output)
-    if m - n > max(0.3 * n, 6):
+    if max_growth is not None and m - n > max(max_growth * n, LENGTH_SLACK_CHARS):
         return False
-    return n - m <= max(0.6 * n, 6)
+    return min_keep is None or n - m <= max((1 - min_keep) * n, LENGTH_SLACK_CHARS)
 
 
 def clean_output(output: str, original: str) -> str:
@@ -135,13 +139,15 @@ async def refine(
     detected_language: str,
     vocabulary: str = "",
     system_prompt: str = "",
+    min_keep: float | None = 0.4,
+    max_growth: float | None = 0.3,
 ) -> str:
     """Return the refined text, or the original text on any failure.
-    `system_prompt` is the user's own prompt; empty = the built-in SYSTEM_PROMPT."""
+    `system_prompt` is the user's own prompt; empty = the built-in SYSTEM_PROMPT.
+    `min_keep` / `max_growth` are the length guard's ratios (see accept_output); None = no limit."""
     started = time.monotonic()
-    custom = system_prompt.strip()
     messages = [
-        {"role": "system", "content": custom or SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt.strip() or SYSTEM_PROMPT},
         {"role": "user", "content": build_user_message(text, selected_language, detected_language, vocabulary)},
     ]
     try:
@@ -149,9 +155,7 @@ async def refine(
     except Exception as e:  # timeout, HTTP error, malformed response
         log.warning("LLM refinement failed (%s): %s", type(e).__name__, e)
         return text
-    # The length guard is tuned for the built-in prompt. A custom prompt may legitimately rewrite,
-    # translate or summarize, so then only empty output falls back to the transcript.
-    if not (output.strip() if custom else accept_output(text, output)):
+    if not accept_output(text, output, min_keep, max_growth):
         log.info("LLM output rejected (len %d -> %d)", len(text), len(output))
         return text
     log.info(

@@ -127,6 +127,11 @@ class Settings:
     llm_timeout_seconds: float = 8.0
     # The user's own system prompt for refinement; empty = the built-in one (llm.SYSTEM_PROMPT).
     llm_system_prompt: str = ""
+    # Length guard: the refined text is discarded (the unrefined text is typed) when it keeps less than
+    # llm_min_length_percent of the transcript or grows by more than llm_max_growth_percent.
+    llm_length_guard: bool = True
+    llm_min_length_percent: int = 40
+    llm_max_growth_percent: int = 30
     # Secrets: kept in memory only, persisted encrypted (see SECRET_FIELDS).
     llm_api_key: str = field(default="", repr=False)
     # Shared secret of the ASR server (API_TOKEN), sent as "Authorization: Bearer <token>".
@@ -139,6 +144,13 @@ class Settings:
     @property
     def llm_configured(self) -> bool:
         return bool(self.llm_base_url.strip() and self.llm_model.strip())
+
+    @property
+    def llm_length_limits(self) -> tuple[float | None, float | None]:
+        """(min_keep, max_growth) ratios for llm.accept_output; (None, None) = no limit."""
+        if not self.llm_length_guard:
+            return None, None
+        return self.llm_min_length_percent / 100, self.llm_max_growth_percent / 100
 
     @classmethod
     def load(cls, path: Path | None = None) -> Settings:
@@ -182,6 +194,8 @@ class Settings:
         if s.hotkey_mode not in HOTKEY_MODES:
             s.hotkey_mode = cls.hotkey_mode
         s.history_size = max(0, s.history_size)
+        s.llm_min_length_percent = min(100, max(0, s.llm_min_length_percent))
+        s.llm_max_growth_percent = max(0, s.llm_max_growth_percent)
         version = raw.get("settings_version")
         if not isinstance(version, int):
             version = 1
