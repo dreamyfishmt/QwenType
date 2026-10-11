@@ -2,6 +2,10 @@
 
 Threads: keyboard hook, PortAudio callback, asyncio loop (WebSocket/HTTP) and
 injection worker. They only talk to the UI thread through Qt signals.
+
+Review flow: pressing Shift while dictating opens the review box instead of typing the text.
+While it is open, the hotkey records a voice-edit instruction that the LLM applies to the text;
+Enter types the text, Esc discards it, Ctrl+Z undoes the last edit.
 """
 
 from __future__ import annotations
@@ -13,21 +17,24 @@ import sys
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 
 from PySide6.QtCore import QLockFile, QObject, QTimer, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
-from . import __version__, llm, win32
+from . import __version__, editlog, llm, win32
 from .aio import AsyncRunner
 from .asr import AsrBackend, AsrSession, Qwen3StreamingBackend
 from .audio import AudioCapture
 from .capsule import CapsuleWindow
 from .dialogs import SettingsDialog
+from .editlog import EditRecord
 from .hotkey import HotkeyHook, get_hotkey
 from .injector import InjectionError, inject_text, send_mask_key
 from .qtasync import run_async
+from .review import ReviewBox
 from .settings import Settings, settings_dir, settings_path
 from .tray import Tray, app_icon
 
@@ -45,6 +52,17 @@ class State(enum.Enum):
     FINISHING = enum.auto()  # key released, waiting for the final result
     REFINING = enum.auto()  # waiting for the LLM
     INJECTING = enum.auto()
+    REVIEW = enum.auto()  # review box open, waiting for an instruction, Enter or Esc
+    EDITING = enum.auto()  # waiting for the LLM to apply a voice-edit instruction
+
+
+@dataclass
+class Review:
+    """The text in the open review box, its undo stack and what is logged for it."""
+
+    text: str
+    record: EditRecord
+    undo: list[str] = field(default_factory=list)
 
 
 class Controller(QObject):
@@ -68,17 +86,28 @@ class Controller(QObject):
         self._status_busy = False
         self._inject_text = ""
         self._history: deque[str] = deque(maxlen=settings.history_size)
+        self._review_requested = False  # Shift pressed while dictating: open the review box
+        self._instruction = False  # the current recording is a voice-edit instruction
+        self._review: Review | None = None
+        self._asr_text = ""
+        self._asr_language = ""
 
         self.audio = AudioCapture(self)
         self.audio.error.connect(self._on_audio_error)
         self.capsule = self._make_capsule()
 
         self.hotkey = get_hotkey(settings.hotkey)
+        self.review_box = ReviewBox()
+        self.review_box.set_hint(self.hotkey.short_name)
+        self.audio.level.connect(self.review_box.set_level)
         self.hook = HotkeyHook(self.hotkey, self)
         self.hook.pressed.connect(self._on_pressed)
         self.hook.released.connect(self._on_released)
         self.hook.other_key.connect(self._on_other_key)
         self.hook.escape.connect(self._on_escape)
+        self.hook.shift.connect(self._on_shift)
+        self.hook.enter.connect(self._on_enter)
+        self.hook.undo.connect(self._on_undo)
         self.hook.failed.connect(lambda msg: self.tray.icon.showMessage("QwenType", msg))
 
         self.tray = Tray(settings, win32.is_autostart_enabled(), self)
@@ -124,7 +153,21 @@ class Controller(QObject):
     def state(self, value: State) -> None:
         self._state = value
         # Esc cancels in these states; only then is it kept from the focused app.
-        self.hook.capture_escape = value in (State.RECORDING, State.FAILED, State.FINISHING, State.REFINING)
+        self.hook.capture_escape = value in (
+            State.RECORDING,
+            State.FAILED,
+            State.FINISHING,
+            State.REFINING,
+            State.REVIEW,
+            State.EDITING,
+        )
+        self.hook.capture_shift = value is State.RECORDING and not self._instruction
+        self.hook.capture_review = self._review is not None
+
+    @property
+    def ui(self) -> CapsuleWindow | ReviewBox:
+        """Where the recording status is shown: the review box while it is open, else the capsule."""
+        return self.review_box if self._review is not None else self.capsule
 
     def _timer(self, ms: int, slot, single: bool = True) -> QTimer:
         t = QTimer(self)
@@ -155,10 +198,17 @@ class Controller(QObject):
         if self._toggle_mode and self.state is State.RECORDING:
             self._stop_requested()
             return
-        if self.state is not State.IDLE:
+        if self.state is State.REVIEW:
+            if not self.settings.llm_configured:
+                self.review_box.show_error("Voice edits need an LLM: set it up under LLM Refinement in Settings")
+                return
+        elif self.state is not State.IDLE:
             log.debug("Key press ignored in state %s", self.state.name)
             return
-        self.capsule.hide_now()  # e.g. a previous error message
+        self._instruction = self.state is State.REVIEW
+        self._review_requested = False
+        self.capsule.set_mark("")
+        self.ui.hide_now()  # e.g. a previous error message
         self._utterance += 1
         self._press_time = time.monotonic()
         self._shown = False
@@ -188,9 +238,9 @@ class Controller(QObject):
         if self.state is State.FAILED:
             self._show_timer.stop()
             if time.monotonic() - self._press_time < MIN_RECORD_S:
-                self.capsule.dismiss()
+                self.ui.dismiss()
             elif not self._shown:
-                self.capsule.show_error(self._error)
+                self.ui.show_error(self._error)
             self._set_idle()
             return
         if self.state is State.RECORDING:
@@ -203,22 +253,31 @@ class Controller(QObject):
             self._finish()
 
     @Slot()
+    def _on_shift(self) -> None:
+        if self.state is State.RECORDING and not self._instruction and not self._review_requested:
+            log.info("Review requested")
+            self._review_requested = True
+            self.capsule.set_mark("Review")
+
+    @Slot()
     def _on_other_key(self) -> None:
         if self.state is State.RECORDING:
             self._cancel("shortcut")
         elif self.state is State.FAILED:
             self._show_timer.stop()
-            self.capsule.dismiss()
+            self.ui.dismiss()
             self._set_idle()
 
     @Slot()
     def _on_escape(self) -> None:
-        if self.state in (State.RECORDING, State.FINISHING, State.REFINING):
-            self._cancel("Esc")
+        if self.state in (State.RECORDING, State.FINISHING, State.REFINING, State.EDITING):
+            self._cancel("Esc")  # with the review box open, it stays open
         elif self.state is State.FAILED:
             self._show_timer.stop()
-            self.capsule.dismiss()
+            self.ui.dismiss()
             self._set_idle()
+        elif self.state is State.REVIEW:
+            self._close_review(commit=False)
 
     def _poll_key(self) -> None:
         # Safety net in case the hook misses the key-up (e.g. secure desktop).
@@ -237,12 +296,12 @@ class Controller(QObject):
     def _on_show_timer(self) -> None:
         if self.state is State.RECORDING:
             self._shown = True
-            self.capsule.show_listening()
+            self.ui.show_listening()
             if self._pending_partial:
-                self.capsule.set_text(self._pending_partial)
+                self.ui.set_text(self._pending_partial)
         elif self.state is State.FAILED:
             self._shown = True
-            self.capsule.show_error(self._error)
+            self.ui.show_error(self._error)
 
     def _on_max_duration(self) -> None:
         if self.state is State.RECORDING:
@@ -262,7 +321,7 @@ class Controller(QObject):
         if self._session is not None:
             self._session.cancel()
             self._session = None
-        self.capsule.dismiss()
+        self.ui.dismiss()
         self._set_idle()
 
     def _finish(self, notice: str = "") -> None:
@@ -273,16 +332,18 @@ class Controller(QObject):
         self.state = State.FINISHING
         self.tray.set_recording(False)
         if notice:
-            self.capsule.show_notice(notice)
+            self.ui.show_notice(notice)
         # The last partial chunk is flushed before "stop" (same worker thread).
         self.audio.stop(flush=True, then=session.stop if session else None)
         s = self.settings
         self._watchdog.start(int((s.ready_timeout_seconds + s.final_timeout_seconds + 5) * 1000))
 
     def _set_idle(self) -> None:
+        """Done with the current recording: back to idle, or to the review box if it is open."""
         self._stop_timers()
         self._watchdog.stop()
-        self.state = State.IDLE
+        self._instruction = False
+        self.state = State.REVIEW if self._review is not None else State.IDLE
         self.tray.set_recording(False)
 
     def _fail(self, message: str) -> None:
@@ -296,7 +357,7 @@ class Controller(QObject):
         if self._toggle_mode:
             # The key isn't held in toggle mode: no release to wait for.
             self._show_timer.stop()
-            self.capsule.show_error(message)
+            self.ui.show_error(message)
             self._set_idle()
             return
         if self.state is State.RECORDING and not self._shown:
@@ -309,7 +370,7 @@ class Controller(QObject):
             self.tray.set_recording(False)
             return
         was_recording = self.state is State.RECORDING
-        self.capsule.show_error(message)
+        self.ui.show_error(message)
         if was_recording:
             self.state = State.FAILED  # swallow the coming key release
             self._error = message
@@ -329,7 +390,7 @@ class Controller(QObject):
         if not self._is_current() or self.state not in (State.RECORDING, State.FINISHING):
             return
         if self._shown:
-            self.capsule.set_text(text)
+            self.ui.set_text(text)
         else:
             self._pending_partial = text
 
@@ -344,14 +405,19 @@ class Controller(QObject):
         text = text.strip()
         if not text:
             log.info("Empty transcript")
-            self.capsule.dismiss()
+            self.ui.dismiss()
             self._set_idle()
             return
+        if self._instruction:
+            self._start_edit(text)
+            return
+        self._asr_text, self._asr_language = text, language
         s = self.settings
         if s.llm_enabled and s.llm_configured:
             self.state = State.REFINING
             self.capsule.show_status("Refining…")
             utterance = self._utterance
+            min_keep, max_growth = s.llm_length_limits
             coro = llm.refine(
                 text,
                 base_url=s.llm_base_url,
@@ -361,10 +427,13 @@ class Controller(QObject):
                 selected_language=s.language,
                 detected_language=language,
                 vocabulary=s.asr_context,
+                system_prompt=s.llm_system_prompt,
+                min_keep=min_keep,
+                max_growth=max_growth,
             )
             run_async(self.runner, coro, lambda result, error: self._on_refined(utterance, text, result, error))
         else:
-            self._inject(text)
+            self._deliver(text, None)
 
     @Slot(float)
     def _on_audio_limit(self, seconds: float) -> None:
@@ -392,7 +461,99 @@ class Controller(QObject):
     def _on_refined(self, utterance: int, original: str, result, error) -> None:
         if utterance != self._utterance or self.state is not State.REFINING:
             return
-        self._inject(result if error is None and isinstance(result, str) and result else original)
+        refined = result if error is None and isinstance(result, str) and result else None
+        self._deliver(refined or original, refined)
+
+    def _deliver(self, text: str, refined: str | None) -> None:
+        """The dictated text is ready: type it, or show it in the review box if Shift was pressed."""
+        if self._review_requested:
+            self._open_review(text, refined)
+        else:
+            self._inject(text)
+
+    # -- review box --------------------------------------------------------------------
+
+    def _open_review(self, text: str, refined: str | None) -> None:
+        self.capsule.dismiss()
+        record = EditRecord(
+            asr=self._asr_text, refined=refined, language=self._asr_language, app=win32.foreground_process_name()
+        )
+        self._review = Review(text, record)
+        self._set_idle()  # -> REVIEW
+        self.review_box.open(text)
+        log.info("Review box opened (%d chars)", len(text))
+
+    def _close_review(self, commit: bool) -> None:
+        review = self._review
+        if review is None:
+            return
+        self._review = None
+        self.review_box.close_box()
+        review.record.final = review.text if commit else None
+        if self.settings.review_log:
+            editlog.append(review.record)
+        log.info("Review box %s (%d edits)", "committed" if commit else "discarded", len(review.record.edits))
+        if commit:
+            self._inject(review.text)
+        else:
+            self._add_recent(review.text)  # not lost: one click in Recent copies it
+            self._set_idle()
+
+    def _start_edit(self, instruction: str) -> None:
+        review = self._review
+        assert review is not None
+        s = self.settings
+        self.state = State.EDITING
+        self.review_box.show_status(f"Editing: {instruction}")
+        utterance = self._utterance
+        coro = llm.edit(
+            review.text,
+            instruction,
+            base_url=s.llm_base_url,
+            api_key=s.llm_api_key,
+            model=s.llm_model,
+            timeout=s.llm_timeout_seconds,
+            vocabulary=s.asr_context,
+            system_prompt=s.llm_edit_prompt,
+        )
+        run_async(self.runner, coro, lambda result, error: self._on_edited(utterance, instruction, result, error))
+
+    def _on_edited(self, utterance: int, instruction: str, result, error) -> None:
+        review = self._review
+        if utterance != self._utterance or self.state is not State.EDITING or review is None:
+            return
+        self._set_idle()  # -> REVIEW
+        self.review_box.hide_now()
+        if error is not None or not isinstance(result, str):
+            log.warning("Voice edit failed: %r", error)
+            message = str(error) or type(error).__name__
+            self.review_box.show_error(f"Edit failed: {message[:120]}")
+            return
+        review.undo.append(review.text)
+        review.text = result
+        review.record.edits.append({"instruction": instruction, "result": result})
+        self.review_box.set_body(result)
+
+    @Slot()
+    def _on_enter(self) -> None:
+        if self.state is State.REVIEW:
+            self._close_review(commit=True)
+        elif self._review is not None:
+            self.review_box.show_notice("Finish the edit first, or press Esc to cancel it")
+
+    @Slot()
+    def _on_undo(self) -> None:
+        review = self._review
+        if review is None:
+            return
+        if self.state is not State.REVIEW:
+            self._cancel("undo")  # an instruction being spoken or applied
+        if review.undo:
+            review.text = review.undo.pop()
+            review.record.edits.append({"undo": review.text})
+            self.review_box.set_body(review.text)
+        else:
+            self.review_box.show_notice("Nothing to undo")
 
     # -- injection ---------------------------------------------------------------------
 
@@ -488,7 +649,7 @@ class Controller(QObject):
         if self.state is State.RECORDING:
             self._cancel(why)
         elif self.state is State.FAILED:
-            self.capsule.dismiss()
+            self.ui.dismiss()
             self._set_idle()
 
     def _set_hotkey(self, hotkey_id: str) -> None:
@@ -497,6 +658,7 @@ class Controller(QObject):
         self.settings.hotkey = self.hotkey.id
         self._save()
         self.hook.set_hotkey(self.hotkey)
+        self.review_box.set_hint(self.hotkey.short_name)
         self.tray.set_hotkey(self.hotkey.id, self.settings.hotkey_mode)
         log.info("Hotkey set to %s", self.hotkey.id)
 
@@ -551,6 +713,7 @@ class Controller(QObject):
         self.hook.stop()
         self.audio.shutdown()
         self.capsule.hide_now()
+        self.review_box.close_box()
         self.tray.hide()
         try:
             self.runner.submit(llm.close_client()).result(1.0)

@@ -2,10 +2,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
-from qwentype import llm
+from qwentype import editlog, llm
 from qwentype.asr.qwen3 import auth_headers, build_ws_url, describe_close, is_local_url, parse_max_duration
 from qwentype.audio import CHUNK_BYTES, Resampler, rms_level, to_pcm16
 from qwentype.injector import utf16_units
@@ -28,14 +29,17 @@ class SettingsTest(unittest.TestCase):
     def test_roundtrip_and_key_clearing(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "settings.json"
-            s = Settings(language="ja", llm_api_key="sk-secret", llm_model="m", max_record_seconds=30)
+            s = Settings(
+                language="ja", llm_api_key="sk-secret", llm_model="m", max_record_seconds=30, llm_system_prompt="P"
+            )
             s.save(p)
             raw = json.loads(p.read_text(encoding="utf-8"))
             self.assertNotIn("llm_api_key", raw)
             self.assertNotIn("sk-secret", p.read_text(encoding="utf-8"))
             t = Settings.load(p)
             self.assertEqual(
-                (t.language, t.llm_api_key, t.llm_model, t.max_record_seconds), ("ja", "sk-secret", "m", 30.0)
+                (t.language, t.llm_api_key, t.llm_model, t.max_record_seconds, t.llm_system_prompt),
+                ("ja", "sk-secret", "m", 30.0, "P"),
             )
             t.llm_api_key = ""
             t.save(p)
@@ -101,6 +105,19 @@ class SettingsTest(unittest.TestCase):
             p.write_text('{"hotkey": "f99", "hotkey_mode": "sticky", "history_size": -3}', encoding="utf-8")
             s = Settings.load(p)
             self.assertEqual((s.hotkey, s.hotkey_mode, s.history_size), ("right_ctrl", "hold", 0))
+
+    def test_llm_length_guard_settings(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "settings.json"
+            s = Settings.load(p)
+            self.assertEqual(s.llm_length_limits, (0.4, 0.3))
+            Settings(llm_min_length_percent=25, llm_max_growth_percent=200).save(p)
+            self.assertEqual(Settings.load(p).llm_length_limits, (0.25, 2.0))
+            Settings(llm_length_guard=False).save(p)
+            self.assertEqual(Settings.load(p).llm_length_limits, (None, None))
+            p.write_text('{"llm_min_length_percent": 150, "llm_max_growth_percent": -5}', encoding="utf-8")
+            s = Settings.load(p)
+            self.assertEqual((s.llm_min_length_percent, s.llm_max_growth_percent), (100, 0))
 
     def test_reads_utf8_bom(self):
         with tempfile.TemporaryDirectory() as d:
@@ -178,16 +195,55 @@ class LlmTest(unittest.TestCase):
         self.assertTrue(llm.accept_output("我用配森写杰森解析", "我用Python写JSON解析"))
         self.assertTrue(llm.accept_output("配森", "Python"))
         self.assertFalse(llm.accept_output("abc", ""))
+        filler = "嗯，那个，我觉得这个方案，呃，就是，还可以吧。"
+        self.assertTrue(llm.accept_output(filler, "我觉得这个方案还可以吧。"))  # filler removal shrinks a lot
         long = "这是一个比较长的句子，用来测试长度保护是否生效。" * 2
-        self.assertFalse(llm.accept_output(long, long[: len(long) // 2]))
+        self.assertFalse(llm.accept_output(long, long[: len(long) // 3]))  # summarized
+        self.assertFalse(llm.accept_output(long, long + long[:20]))  # grew: answered or expanded
+
+    def test_guard_limits(self):
+        long = "这是一个比较长的句子，用来测试长度保护是否生效。" * 2  # 48 characters
+        third, longer = long[: len(long) // 3], long + long[:24]  # 33% and +50%
+        self.assertTrue(llm.accept_output(long, third, min_keep=0.3))
+        self.assertFalse(llm.accept_output(long, longer, max_growth=0.3))
+        self.assertTrue(llm.accept_output(long, longer, max_growth=0.5))
+        self.assertTrue(llm.accept_output(long, "短", min_keep=None, max_growth=None))
+        self.assertTrue(llm.accept_output(long, long * 5, min_keep=None, max_growth=None))
+        self.assertFalse(llm.accept_output(long, " ", min_keep=None, max_growth=None))  # never empty
+        self.assertTrue(llm.accept_output("配森", "Python", max_growth=0))  # short texts keep the slack
 
     def test_vocabulary_in_user_message(self):
         self.assertIn("QwenType", llm.build_user_message("t", "zh-CN", "Chinese", "Vocabulary: QwenType"))
         self.assertNotIn("vocabulary", llm.build_user_message("t", "zh-CN", "Chinese", "").lower())
 
+    def test_edit_message(self):
+        msg = llm.build_edit_message("我觉得可以", "改成英文", "Vocabulary: QwenType")
+        self.assertEqual(msg.splitlines()[-1], "改成英文")
+        self.assertIn("Text:\n我觉得可以", msg)
+        self.assertIn("QwenType", msg)
+        self.assertNotIn("vocabulary", llm.build_edit_message("t", "i").lower())
+
     def test_clean(self):
         self.assertEqual(llm.clean_output('"你好"', "你好"), "你好")
         self.assertEqual(llm.clean_output("「你好」", "你好"), "你好")
+
+
+class EditLogTest(unittest.TestCase):
+    def test_append_and_rotate(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "edits.jsonl"
+            record = editlog.EditRecord(asr="配森", refined="Python", final="Python 3")
+            record.edits.append({"instruction": "加上版本号", "result": "Python 3"})
+            editlog.append(record, p)
+            editlog.append(record, p)
+            lines = p.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 2)
+            self.assertIn("配森", lines[0])  # not escaped
+            self.assertEqual(json.loads(lines[0])["edits"][0]["result"], "Python 3")
+            with mock.patch.object(editlog, "MAX_BYTES", 10):
+                editlog.append(record, p)
+            self.assertEqual(len(p.read_text(encoding="utf-8").splitlines()), 1)
+            self.assertEqual(len((Path(d) / "edits.1.jsonl").read_text(encoding="utf-8").splitlines()), 2)
 
 
 class InjectorTest(unittest.TestCase):

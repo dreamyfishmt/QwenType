@@ -16,14 +16,21 @@ into the focused app. Shortcuts that use Right Ctrl (Ctrl+C, …) keep working a
   then reserved for QwenType and lose their usual function). Turn on **Tap to start, tap to stop** to dictate without
   holding the key. **Esc** cancels the current recording in either mode; it is only taken from the focused app while a
   recording (or its result) is in progress.
+- **Review and edit by voice**: press **Shift** while dictating (the capsule shows a *Review* tag) and the text opens
+  in a review box instead of being typed. Then hold the hotkey again and speak an instruction, e.g. "make it more
+  formal" or "change Wednesday to Thursday": the LLM applies it to the text, and you can repeat this. **Enter** types
+  the text, **Esc** discards it (it stays in **Recent**), **Ctrl+Z** undoes the last edit. The box never takes the
+  focus, so the text goes to the app you were dictating into; Enter, Esc and Ctrl+Z are only taken from that app while
+  the box is open. Voice edits need the LLM settings (see below), not the **LLM Refinement** toggle.
 - **Recent** in the tray menu lists the last 10 transcripts; click one to copy it. They are kept in memory only.
   If typing fails, the text is copied to the clipboard so it isn't lost.
 
 - Default language: Auto-detect. QwenType sends no `language` parameter and the model detects the language of
   each utterance. To force one, pick it under **Language** in the tray menu (English, 简体中文, 繁體中文, 日本語,
   한국어); 简体中文 also handles mixed Chinese–English speech, with English words kept in Latin script.
-- Optional **LLM Refinement**: an OpenAI-compatible model fixes obvious recognition errors (配森 → Python,
-  杰森 → JSON) and nothing else. If it fails or rewrites too much, the unrefined text is used.
+- Optional **LLM Refinement**: an OpenAI-compatible model tidies up the spoken text faithfully: it drops filler words,
+  stutters and accidental repetitions and fixes clearly misrecognized words, but keeps your wording. If it fails or
+  changes too much, the unrefined text is used.
 - Settings are stored in `%APPDATA%\QwenType\settings.json`, with the server token and the LLM API key encrypted by
   Windows DPAPI. The log is `%APPDATA%\QwenType\qwentype.log`.
 
@@ -132,7 +139,20 @@ Open **Settings…** in the tray menu; the **ASR Server** tab has:
 `https://`, same host and port), so a wrong token shows up before the first recording.
 
 The **LLM Refinement** tab has the API base URL, key, model and timeout (turn refinement on under **LLM Refinement**
-in the tray menu). The **Advanced** tab has:
+in the tray menu), the length guard and the **System prompt**:
+
+- **Length guard**: the refined text is discarded and the unrefined text is typed when it keeps less than
+  **Keep at least** (default 40%) of the transcript or grows by more than **grow at most** (default +30%). This guards
+  against the model rewriting, summarizing or answering; short texts may always change by 6 characters. Uncheck it
+  to accept any length (only an empty answer still falls back to the unrefined text).
+- **System prompts**: the **Refinement** tab is the prompt for each transcript, the **Voice edit** tab the prompt for
+  instructions in the review box. Each shows the built-in prompt; edit it to make the model do something else (your
+  own prompt is then used instead), and **Default** restores the built-in one of the selected tab. An empty prompt
+  also means the built-in one. If your refinement prompt asks for rewrites, translation or summaries, loosen or turn
+  off the length guard (it never applies to voice edits).
+- **Test** sends a sample sentence with the refinement prompt.
+
+The **Advanced** tab has:
 
 | Option | Default | |
 |---|---|---|
@@ -144,10 +164,11 @@ in the tray menu). The **Advanced** tab has:
 | Recent transcripts | 10 | Entries in the tray's **Recent** menu; `Off` disables it. |
 | Copy the text to the clipboard when typing fails | on | |
 | Blur behind the capsule | off | Windows draws the acrylic blur over the whole window rectangle, so it can show as a box. |
+| Keep a local log of review-box texts | off | Appends the transcript, refined text, voice edits and typed text of each review-box session to `edits.jsonl` in the settings folder (unencrypted; delete the file to clear it), so a later version can learn from your corrections. |
 
 **Open Settings Folder** opens `%APPDATA%\QwenType`, which also has the log. The same options are in `settings.json`
 (`max_record_seconds`, `ready_timeout_seconds`, `final_timeout_seconds`, `unicode_max_chars`, `clipboard_apps`,
-`history_size`, `copy_on_failure`, `capsule_blur`, `hotkey`, `hotkey_mode`); edit the file only while QwenType isn't
+`history_size`, `copy_on_failure`, `capsule_blur`, `review_log`, `hotkey`, `hotkey_mode`); edit the file only while QwenType isn't
 running.
 
 ## Run and build

@@ -52,6 +52,7 @@ COLOR_TEXT = QColor(245, 246, 250)
 COLOR_PLACEHOLDER = QColor(245, 246, 250, 150)
 COLOR_STATUS = QColor(170, 205, 255)
 COLOR_ERROR = QColor(255, 138, 128)
+MARK_GAP, MARK_PAD_X, MARK_H = 10, 8, 20
 
 
 class WaveformWidget(QWidget):
@@ -151,6 +152,7 @@ class CapsuleWindow(QWidget):
         self._text = ""
         self._color = COLOR_PLACEHOLDER
         self._closing = False
+        self._mark = ""  # small tag after the text, e.g. "Review" when Shift was pressed
 
         font = QFont()
         font.setFamilies(
@@ -159,6 +161,9 @@ class CapsuleWindow(QWidget):
         font.setPixelSize(16)
         self.setFont(font)
         self._fm = QFontMetricsF(font)
+        self._mark_font = QFont(font)
+        self._mark_font.setPixelSize(12)
+        self._mark_fm = QFontMetricsF(self._mark_font)
 
         self.wave = WaveformWidget(self)
 
@@ -252,6 +257,11 @@ class CapsuleWindow(QWidget):
     def set_level(self, level: float) -> None:
         self.wave.set_level(level)
 
+    def set_mark(self, text: str) -> None:
+        if text != self._mark:
+            self._mark = text
+            self._apply_geometry()
+
     def dismiss(self) -> None:
         self._auto_hide.stop()
         self._restore.stop()
@@ -328,8 +338,12 @@ class CapsuleWindow(QWidget):
             self._width_anim.start()
         self.update()
 
+    def _mark_width(self) -> float:
+        return math.ceil(self._mark_fm.horizontalAdvance(self._mark)) + 2 * MARK_PAD_X if self._mark else 0.0
+
     def _base_width(self) -> float:
-        return PAD_LEFT + WAVE_W + GAP + self._label_w + PAD_RIGHT
+        mark = MARK_GAP + self._mark_width() if self._mark else 0.0
+        return PAD_LEFT + WAVE_W + GAP + self._label_w + mark + PAD_RIGHT
 
     def _apply_geometry(self) -> None:
         s = self._scale
@@ -376,3 +390,11 @@ class CapsuleWindow(QWidget):
             int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
             text,
         )
+        if self._mark:
+            tag = QRectF(x + self._label_w + MARK_GAP, (HEIGHT - MARK_H) / 2, self._mark_width(), MARK_H)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(170, 205, 255, 60))
+            p.drawRoundedRect(tag, MARK_H / 2, MARK_H / 2)
+            p.setPen(COLOR_STATUS)
+            p.setFont(self._mark_font)
+            p.drawText(tag, int(Qt.AlignmentFlag.AlignCenter), self._mark)

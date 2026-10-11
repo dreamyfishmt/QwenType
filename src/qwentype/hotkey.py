@@ -6,6 +6,11 @@ update a few booleans and emit Qt signals. Modifier hotkeys (Right Ctrl, Right
 Alt, Right Shift) are always passed on (CallNextHookEx), so shortcuts keep
 working. Dedicated keys (Caps Lock, Scroll Lock, Pause) and the mouse side
 buttons are swallowed: they would otherwise toggle a lock state or navigate back.
+
+A few other keys are taken from the focused app only while QwenType needs them: Esc while a
+recording can be cancelled, Shift while dictating (marks the utterance for review), and Enter and
+Ctrl+Z while the review box is open. A swallowed key-down's auto-repeats and key-up are swallowed
+too, so the app never sees half a key press.
 """
 
 from __future__ import annotations
@@ -35,8 +40,17 @@ WM_XBUTTONUP = 0x020C
 WM_QUIT = 0x0012
 LLKHF_EXTENDED = 0x01
 
+VK_RETURN = 0x0D
+VK_SHIFT = 0x10
+VK_CONTROL = 0x11
 VK_ESCAPE = 0x1B
+VK_Z = 0x5A
+VK_LSHIFT = 0xA0
+VK_RSHIFT = 0xA1
 VK_LCONTROL = 0xA2
+VK_RCONTROL = 0xA3
+SHIFT_VKS = (VK_SHIFT, VK_LSHIFT, VK_RSHIFT)
+CONTROL_VKS = (VK_CONTROL, VK_LCONTROL, VK_RCONTROL)
 # AltGr layouts send a fake Left Ctrl with this scan code together with Right Alt.
 ALTGR_FAKE_LCTRL_SCAN = 0x21D
 # Auto-repeat sends key-downs at least every ~1 s (the longest repeat delay Windows allows).
@@ -131,12 +145,17 @@ if IS_WINDOWS:
 class HotkeyHook(QObject):
     """Emits pressed / released for the hotkey, other_key for any other key
     pressed while a modifier hotkey is held (i.e. a shortcut such as Ctrl+C),
-    and escape for Esc while capture_escape is set (Esc is then swallowed)."""
+    escape for Esc while capture_escape is set, shift for Shift while capture_shift
+    is set, and enter / undo (Ctrl+Z) while capture_review is set. Captured keys
+    are swallowed."""
 
     pressed = Signal()
     released = Signal()
     other_key = Signal()
     escape = Signal()
+    shift = Signal()
+    enter = Signal()
+    undo = Signal()
     failed = Signal(str)
 
     def __init__(self, hotkey: Hotkey, parent: QObject | None = None) -> None:
@@ -148,10 +167,13 @@ class HotkeyHook(QObject):
         self._down = False
         self._other_reported = False
         self._last_down_ms = 0
-        self._esc_swallowed = False
-        # Set by the UI thread while a recording can be cancelled; only then is Esc taken away
-        # from the focused app. A plain bool: reads and writes are atomic.
-        self.capture_escape = False
+        self._swallowed: set[int] = set()  # keys whose key-down was swallowed: swallow until key-up
+        self._ctrl_down: set[int] = set()
+        # Set by the UI thread; only then are these keys taken away from the focused app.
+        # Plain bools: reads and writes are atomic.
+        self.capture_escape = False  # a recording can be cancelled
+        self.capture_shift = False  # dictating: Shift marks the utterance for review
+        self.capture_review = False  # the review box is open: Enter and Ctrl+Z
 
     def reset(self) -> None:
         """Forget a held key, e.g. after its release was detected by polling (the hook missed it)."""
@@ -272,6 +294,9 @@ class HotkeyHook(QObject):
         is_down = msg in (WM_KEYDOWN, WM_SYSKEYDOWN)
         is_up = msg in (WM_KEYUP, WM_SYSKEYUP)
         hk = self.hotkey
+        # Tracked first (Right Ctrl may be the hotkey); AltGr's fake Left Ctrl isn't a Ctrl press.
+        if vk in CONTROL_VKS and (is_down or is_up) and scan != ALTGR_FAKE_LCTRL_SCAN:
+            (self._ctrl_down.add if is_down else self._ctrl_down.discard)(vk)
         if (
             hk.vks
             and vk in hk.vks
@@ -282,14 +307,24 @@ class HotkeyHook(QObject):
             return not hk.modifier
         if vk == VK_LCONTROL and scan == ALTGR_FAKE_LCTRL_SCAN:
             return False  # part of AltGr, not a shortcut
-        if vk == VK_ESCAPE:
-            if is_down and self.capture_escape:
-                self._esc_swallowed = True
-                self.escape.emit()
+        if vk in self._swallowed:
+            if is_up:
+                self._swallowed.discard(vk)
+            return True  # auto-repeat or key-up of a captured key: the app never saw its key-down
+        if is_down:
+            signal = None
+            if vk == VK_ESCAPE and self.capture_escape:
+                signal = self.escape
+            elif vk in SHIFT_VKS and self.capture_shift:
+                signal = self.shift
+            elif vk == VK_RETURN and self.capture_review:
+                signal = self.enter
+            elif vk == VK_Z and self.capture_review and self._ctrl_down:
+                signal = self.undo
+            if signal is not None:
+                self._swallowed.add(vk)
+                signal.emit()
                 return True
-            if is_up and self._esc_swallowed:
-                self._esc_swallowed = False
-                return True  # the app never saw the key-down
         if is_down and self._down and hk.modifier and not self._other_reported:
             self._other_reported = True
             self.other_key.emit()

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -137,6 +138,21 @@ class AsrServerPage(QWidget):
         run_async(self._runner, fetch_status(base, token), done)
 
 
+def _prompt_edit(text: str, tip: str) -> QPlainTextEdit:
+    edit = QPlainTextEdit(text.strip())
+    edit.setTabChangesFocus(True)
+    edit.setMinimumHeight(160)
+    edit.setToolTip(tip)
+    return edit
+
+
+def _custom(edit: QPlainTextEdit, builtin: str) -> str:
+    """The edited prompt, or "" when it is empty or the built-in one (so later app updates of the
+    built-in prompt still apply)."""
+    text = edit.toPlainText().strip()
+    return "" if text == builtin.strip() else text
+
+
 class LlmPage(QWidget):
     def __init__(self, settings: Settings, runner: AsyncRunner) -> None:
         super().__init__()
@@ -157,11 +173,64 @@ class LlmPage(QWidget):
         self.timeout.setValue(settings.llm_timeout_seconds)
         self.timeout.setToolTip("If the model doesn't answer in time, the unrefined text is typed.")
 
+        guard_tip = (
+            "When the refined text is shorter or longer than these limits, it is discarded and the "
+            "unrefined text is typed (a guard against the model rewriting, summarizing or answering). "
+            "Short texts may always change by a few characters. Turn it off to accept any length."
+        )
+        self.length_guard = QCheckBox("Keep at least")
+        self.length_guard.setChecked(settings.llm_length_guard)
+        self.min_length = QSpinBox()
+        self.min_length.setRange(0, 100)
+        self.min_length.setSuffix(" %")
+        self.min_length.setValue(settings.llm_min_length_percent)
+        self.max_growth = QSpinBox()
+        self.max_growth.setRange(0, 1000)
+        self.max_growth.setPrefix("+")
+        self.max_growth.setSuffix(" %")
+        self.max_growth.setValue(settings.llm_max_growth_percent)
+        growth_label = QLabel("and grow at most")
+        guard_row = QHBoxLayout()
+        for w in (self.length_guard, self.min_length, growth_label, self.max_growth):
+            w.setToolTip(guard_tip)
+            guard_row.addWidget(w)
+        guard_row.addStretch(1)
+
+        def update_guard() -> None:
+            for w in (self.min_length, growth_label, self.max_growth):
+                w.setEnabled(self.length_guard.isChecked())
+
+        self.length_guard.toggled.connect(update_guard)
+        update_guard()
+
+        # Each editor shows the prompt in use, so the built-in one can be edited as a starting point.
+        self.prompt = _prompt_edit(
+            settings.llm_system_prompt or llm.SYSTEM_PROMPT,
+            "What the model is told to do with each transcript. If your prompt asks for rewrites, "
+            "translation or summaries, loosen or turn off the length guard.",
+        )
+        self.edit_prompt = _prompt_edit(
+            settings.llm_edit_prompt or llm.EDIT_SYSTEM_PROMPT,
+            "What the model is told to do with a voice-edit instruction in the review box "
+            "(press Shift while dictating to open it). The length guard doesn't apply to edits.",
+        )
+        self.prompts = QTabWidget()
+        self.prompts.addTab(self.prompt, "Refinement")
+        self.prompts.addTab(self.edit_prompt, "Voice edit")
+        reset_prompt = QPushButton("Default")
+        reset_prompt.setToolTip("Restore the built-in prompt of the selected tab.")
+        reset_prompt.clicked.connect(self._reset_prompt)
+        prompt_label = QHBoxLayout()
+        prompt_label.addWidget(QLabel("System prompts"))
+        prompt_label.addStretch(1)
+        prompt_label.addWidget(reset_prompt)
+
         form = QFormLayout()
         form.addRow("API Base URL", self.base_url)
         form.addRow("API Key", self.api_key)
         form.addRow("Model", self.model)
         form.addRow("Timeout", self.timeout)
+        form.addRow("Length guard", guard_row)
 
         self.status = _status_label()
         self.test_button = QPushButton("Test")
@@ -172,15 +241,17 @@ class LlmPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
+        layout.addLayout(prompt_label)
+        layout.addWidget(self.prompts, 1)
         layout.addWidget(
             _note(
                 "OpenAI-compatible Chat Completions API. The API key is encrypted with "
                 "Windows DPAPI for the current user. Leave it empty for servers without auth. "
-                "Turn refinement on or off under LLM Refinement in the tray menu."
+                "Empty system prompt = built-in. Turn refinement on or off under LLM Refinement "
+                "in the tray menu."
             )
         )
         layout.addWidget(self.status)
-        layout.addStretch(1)
         layout.addLayout(test_row)
 
     def validate(self) -> str | None:
@@ -194,6 +265,21 @@ class LlmPage(QWidget):
         settings.llm_api_key = self.api_key.text().strip()
         settings.llm_model = self.model.text().strip()
         settings.llm_timeout_seconds = self.timeout.value()
+        settings.llm_system_prompt = self.custom_prompt()
+        settings.llm_edit_prompt = _custom(self.edit_prompt, llm.EDIT_SYSTEM_PROMPT)
+        settings.llm_length_guard = self.length_guard.isChecked()
+        settings.llm_min_length_percent = self.min_length.value()
+        settings.llm_max_growth_percent = self.max_growth.value()
+
+    def custom_prompt(self) -> str:
+        """The edited refinement prompt; "" = the built-in one."""
+        return _custom(self.prompt, llm.SYSTEM_PROMPT)
+
+    def _reset_prompt(self) -> None:
+        if self.prompts.currentWidget() is self.edit_prompt:
+            self.edit_prompt.setPlainText(llm.EDIT_SYSTEM_PROMPT)
+        else:
+            self.prompt.setPlainText(llm.SYSTEM_PROMPT)
 
     def _test(self) -> None:
         error = self.validate()
@@ -215,7 +301,8 @@ class LlmPage(QWidget):
                 self.status.setText(f"Failed: {msg[:300]}")
 
         base, key, model = self.base_url.text().strip(), self.api_key.text().strip(), self.model.text().strip()
-        run_async(self._runner, llm.test_connection(base, key, model), done)
+        test = llm.test_connection(base, key, model, system_prompt=self.custom_prompt())
+        run_async(self._runner, test, done)
 
 
 def _seconds(value: float, low: float, high: float, tip: str) -> QDoubleSpinBox:
@@ -268,6 +355,14 @@ class AdvancedPage(QWidget):
         self.capsule_blur.setChecked(settings.capsule_blur)
         self.capsule_blur.setToolTip("Windows draws the blur over the whole window rectangle, which can show as a box.")
 
+        self.review_log = QCheckBox("Keep a local log of review-box texts (edits.jsonl)")
+        self.review_log.setChecked(settings.review_log)
+        self.review_log.setToolTip(
+            "Saves the transcript, refined text, voice edits and the typed text of each review-box "
+            "session in the settings folder, so recognition can later learn from your corrections. "
+            "Stored unencrypted; delete edits.jsonl to clear it."
+        )
+
         form = QFormLayout()
         form.addRow("Max recording", self.max_record)
         form.addRow("Server ready timeout", self.ready_timeout)
@@ -277,6 +372,7 @@ class AdvancedPage(QWidget):
         form.addRow("Recent transcripts", self.history_size)
         form.addRow("", self.copy_on_failure)
         form.addRow("", self.capsule_blur)
+        form.addRow("", self.review_log)
 
         open_folder = QPushButton("Open Settings Folder")
         open_folder.setToolTip(str(settings_dir()))
@@ -303,6 +399,7 @@ class AdvancedPage(QWidget):
         settings.history_size = self.history_size.value()
         settings.copy_on_failure = self.copy_on_failure.isChecked()
         settings.capsule_blur = self.capsule_blur.isChecked()
+        settings.review_log = self.review_log.isChecked()
 
 
 class SettingsDialog(QDialog):
