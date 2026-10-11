@@ -171,6 +171,32 @@ class SettingsDialogTest(unittest.TestCase):
         self.assertEqual((s.history_size, s.copy_on_failure, s.capsule_blur), (0, False, True))
         self.assertEqual(s.llm_timeout_seconds, 12.0)
 
+    def test_custom_system_prompt(self):
+        from qwentype import llm
+
+        s = Settings()
+        runner = AsyncRunner()
+        try:
+            d = SettingsDialog(s, runner, "llm")
+            self.assertEqual(d.llm.prompt.toPlainText(), llm.SYSTEM_PROMPT)  # built-in shown to edit
+            d.llm.prompt.setPlainText("  Fix typos only.\n")
+            d._save()
+            self.assertEqual(s.llm_system_prompt, "Fix typos only.")
+
+            d = SettingsDialog(s, runner, "llm")
+            self.assertEqual(d.llm.prompt.toPlainText(), "Fix typos only.")
+            d.llm.prompt.setPlainText(llm.SYSTEM_PROMPT)  # the Default button
+            d._save()
+            self.assertEqual(s.llm_system_prompt, "")  # stored as "use the built-in prompt"
+
+            s.llm_system_prompt = "x"
+            d = SettingsDialog(s, runner, "llm")
+            d.llm.prompt.setPlainText("   ")
+            d._save()
+            self.assertEqual(s.llm_system_prompt, "")
+        finally:
+            runner.stop()
+
     def test_invalid_url_switches_to_its_tab(self):
         s = Settings()
         runner = AsyncRunner()

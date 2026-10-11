@@ -28,14 +28,17 @@ class SettingsTest(unittest.TestCase):
     def test_roundtrip_and_key_clearing(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "settings.json"
-            s = Settings(language="ja", llm_api_key="sk-secret", llm_model="m", max_record_seconds=30)
+            s = Settings(
+                language="ja", llm_api_key="sk-secret", llm_model="m", max_record_seconds=30, llm_system_prompt="P"
+            )
             s.save(p)
             raw = json.loads(p.read_text(encoding="utf-8"))
             self.assertNotIn("llm_api_key", raw)
             self.assertNotIn("sk-secret", p.read_text(encoding="utf-8"))
             t = Settings.load(p)
             self.assertEqual(
-                (t.language, t.llm_api_key, t.llm_model, t.max_record_seconds), ("ja", "sk-secret", "m", 30.0)
+                (t.language, t.llm_api_key, t.llm_model, t.max_record_seconds, t.llm_system_prompt),
+                ("ja", "sk-secret", "m", 30.0, "P"),
             )
             t.llm_api_key = ""
             t.save(p)

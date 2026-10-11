@@ -14,6 +14,8 @@ class FakeChatServer:
 
     def __init__(self):
         self.requests: list[tuple[int, str]] = []  # (client port, Authorization header)
+        self.system_prompts: list[str] = []
+        self.reply: str | None = None  # None = echo the transcript
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -22,7 +24,10 @@ class FakeChatServer:
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 outer.requests.append((self.client_address[1], self.headers.get("Authorization", "")))
-                text = body["messages"][-1]["content"].rsplit("\n", 1)[-1]  # echo the transcript
+                outer.system_prompts.append(body["messages"][0]["content"])
+                text = outer.reply
+                if text is None:
+                    text = body["messages"][-1]["content"].rsplit("\n", 1)[-1]  # echo the transcript
                 data = json.dumps({"choices": [{"message": {"content": text}}]}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -52,7 +57,7 @@ class LlmClientTest(unittest.TestCase):
         self.runner.stop()
         self.server.close()
 
-    def _refine(self, text, key="k1"):
+    def _refine(self, text, key="k1", system_prompt=""):
         coro = llm.refine(
             text,
             base_url=self.server.url,
@@ -61,6 +66,7 @@ class LlmClientTest(unittest.TestCase):
             timeout=5,
             selected_language="",
             detected_language="English",
+            system_prompt=system_prompt,
         )
         return self.runner.submit(coro).result(10)
 
@@ -72,6 +78,16 @@ class LlmClientTest(unittest.TestCase):
         self.assertEqual(len(self.server.requests), 3)
         self.assertEqual(len(ports), 1, "expected one reused connection")
         self.assertEqual([auth for _, auth in self.server.requests], ["Bearer k1", "Bearer k1", "Bearer k2"])
+
+    def test_custom_system_prompt(self):
+        long = "please summarize this rather long dictated sentence for me"
+        self.server.reply = "summary"
+        self.assertEqual(self._refine(long), long)  # built-in prompt: the length guard rejects it
+        self.assertEqual(self._refine(long, system_prompt="  Summarize.  "), "summary")
+        self.assertEqual(self._refine(long, system_prompt="   "), long)  # blank = built-in prompt
+        self.assertEqual(self.server.system_prompts, [llm.SYSTEM_PROMPT, "Summarize.", llm.SYSTEM_PROMPT])
+        self.server.reply = "  "
+        self.assertEqual(self._refine(long, system_prompt="Summarize."), long)  # empty output: fall back
 
     def test_new_client_after_close(self):
         self._refine("first")

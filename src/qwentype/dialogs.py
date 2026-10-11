@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -157,6 +158,22 @@ class LlmPage(QWidget):
         self.timeout.setValue(settings.llm_timeout_seconds)
         self.timeout.setToolTip("If the model doesn't answer in time, the unrefined text is typed.")
 
+        # Shows the prompt in use, so the built-in one can be edited as a starting point.
+        self.prompt = QPlainTextEdit(settings.llm_system_prompt.strip() or llm.SYSTEM_PROMPT)
+        self.prompt.setTabChangesFocus(True)
+        self.prompt.setMinimumHeight(160)
+        self.prompt.setToolTip(
+            "What the model is told to do with each transcript. With your own prompt, its output is used "
+            "even if the length changes a lot; only an empty answer falls back to the unrefined text."
+        )
+        reset_prompt = QPushButton("Default")
+        reset_prompt.setToolTip("Restore the built-in system prompt.")
+        reset_prompt.clicked.connect(lambda: self.prompt.setPlainText(llm.SYSTEM_PROMPT))
+        prompt_label = QHBoxLayout()
+        prompt_label.addWidget(QLabel("System prompt"))
+        prompt_label.addStretch(1)
+        prompt_label.addWidget(reset_prompt)
+
         form = QFormLayout()
         form.addRow("API Base URL", self.base_url)
         form.addRow("API Key", self.api_key)
@@ -172,15 +189,17 @@ class LlmPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
+        layout.addLayout(prompt_label)
+        layout.addWidget(self.prompt, 1)
         layout.addWidget(
             _note(
                 "OpenAI-compatible Chat Completions API. The API key is encrypted with "
                 "Windows DPAPI for the current user. Leave it empty for servers without auth. "
-                "Turn refinement on or off under LLM Refinement in the tray menu."
+                "Empty system prompt = built-in. Turn refinement on or off under LLM Refinement "
+                "in the tray menu."
             )
         )
         layout.addWidget(self.status)
-        layout.addStretch(1)
         layout.addLayout(test_row)
 
     def validate(self) -> str | None:
@@ -194,6 +213,13 @@ class LlmPage(QWidget):
         settings.llm_api_key = self.api_key.text().strip()
         settings.llm_model = self.model.text().strip()
         settings.llm_timeout_seconds = self.timeout.value()
+        settings.llm_system_prompt = self.custom_prompt()
+
+    def custom_prompt(self) -> str:
+        """The edited prompt, or "" when it is empty or the built-in one (so later app updates of the
+        built-in prompt still apply)."""
+        text = self.prompt.toPlainText().strip()
+        return "" if text == llm.SYSTEM_PROMPT.strip() else text
 
     def _test(self) -> None:
         error = self.validate()
@@ -215,7 +241,8 @@ class LlmPage(QWidget):
                 self.status.setText(f"Failed: {msg[:300]}")
 
         base, key, model = self.base_url.text().strip(), self.api_key.text().strip(), self.model.text().strip()
-        run_async(self._runner, llm.test_connection(base, key, model), done)
+        test = llm.test_connection(base, key, model, system_prompt=self.custom_prompt())
+        run_async(self._runner, test, done)
 
 
 def _seconds(value: float, low: float, high: float, tip: str) -> QDoubleSpinBox:

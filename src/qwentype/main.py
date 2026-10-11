@@ -361,6 +361,7 @@ class Controller(QObject):
                 selected_language=s.language,
                 detected_language=language,
                 vocabulary=s.asr_context,
+                system_prompt=s.llm_system_prompt,
             )
             run_async(self.runner, coro, lambda result, error: self._on_refined(utterance, text, result, error))
         else:

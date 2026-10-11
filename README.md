@@ -133,7 +133,11 @@ Open **Settings…** in the tray menu; the **ASR Server** tab has:
 `https://`, same host and port), so a wrong token shows up before the first recording.
 
 The **LLM Refinement** tab has the API base URL, key, model and timeout (turn refinement on under **LLM Refinement**
-in the tray menu). The **Advanced** tab has:
+in the tray menu), and the **System prompt**. It shows the built-in prompt; edit it to make refinement do something
+else (your own prompt is then used instead), and **Default** restores the built-in one. An empty prompt also means the
+built-in one. With your own prompt, the length guard is off: the model's answer is typed even if it is much longer or
+shorter, and only an empty answer falls back to the unrefined text. **Test** sends a sample sentence with the prompt in
+the box. The **Advanced** tab has:
 
 | Option | Default | |
 |---|---|---|

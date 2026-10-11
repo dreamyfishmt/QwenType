@@ -118,7 +118,10 @@ CPU 服务器只在每段话的前 20 秒发送实时中间结果，最终结果
 **Test** 会检查 `GET /ready`，并用 `GET /health` 验证 token（`ws://` → `http://`，`wss://` → `https://`，主机和端口不变），
 token 填错会立刻提示，而不是等到录音时才失败。
 
-**LLM Refinement** 标签页包含 API Base URL、Key、模型和超时时间（在托盘菜单 **LLM Refinement** 中开启整理）。
+**LLM Refinement** 标签页包含 API Base URL、Key、模型和超时时间（在托盘菜单 **LLM Refinement** 中开启整理），以及
+**System prompt**。它默认显示内置提示词；修改后即使用你自己的提示词，点 **Default** 恢复内置提示词，留空也表示使用内置提示词。
+使用自定义提示词时不做长度保护：模型的输出即使明显变长或变短也会上屏，只有输出为空时才使用未整理的原文。**Test** 会用编辑框里的
+提示词发送一句示例。
 **Advanced** 标签页包含：
 
 | 选项 | 默认值 | |

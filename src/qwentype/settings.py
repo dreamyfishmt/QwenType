@@ -125,6 +125,8 @@ class Settings:
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = ""
     llm_timeout_seconds: float = 8.0
+    # The user's own system prompt for refinement; empty = the built-in one (llm.SYSTEM_PROMPT).
+    llm_system_prompt: str = ""
     # Secrets: kept in memory only, persisted encrypted (see SECRET_FIELDS).
     llm_api_key: str = field(default="", repr=False)
     # Shared secret of the ASR server (API_TOKEN), sent as "Authorization: Bearer <token>".

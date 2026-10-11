@@ -134,11 +134,14 @@ async def refine(
     selected_language: str,
     detected_language: str,
     vocabulary: str = "",
+    system_prompt: str = "",
 ) -> str:
-    """Return the refined text, or the original text on any failure."""
+    """Return the refined text, or the original text on any failure.
+    `system_prompt` is the user's own prompt; empty = the built-in SYSTEM_PROMPT."""
     started = time.monotonic()
+    custom = system_prompt.strip()
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": custom or SYSTEM_PROMPT},
         {"role": "user", "content": build_user_message(text, selected_language, detected_language, vocabulary)},
     ]
     try:
@@ -146,7 +149,9 @@ async def refine(
     except Exception as e:  # timeout, HTTP error, malformed response
         log.warning("LLM refinement failed (%s): %s", type(e).__name__, e)
         return text
-    if not accept_output(text, output):
+    # The length guard is tuned for the built-in prompt. A custom prompt may legitimately rewrite,
+    # translate or summarize, so then only empty output falls back to the transcript.
+    if not (output.strip() if custom else accept_output(text, output)):
         log.info("LLM output rejected (len %d -> %d)", len(text), len(output))
         return text
     log.info(
@@ -155,7 +160,9 @@ async def refine(
     return output
 
 
-async def test_connection(base_url: str, api_key: str, model: str, timeout: float = 15.0) -> str:
+async def test_connection(
+    base_url: str, api_key: str, model: str, timeout: float = 15.0, system_prompt: str = ""
+) -> str:
     """Used by the Settings dialog. Raises on failure; returns a short summary."""
     started = time.monotonic()
     out = await complete(
@@ -163,7 +170,7 @@ async def test_connection(base_url: str, api_key: str, model: str, timeout: floa
         api_key,
         model,
         [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt.strip() or SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": build_user_message("嗯，那个，我觉得这个方案，呃，还可以吧。", "zh-CN", "Chinese"),
