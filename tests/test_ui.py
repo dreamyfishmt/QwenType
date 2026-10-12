@@ -284,6 +284,28 @@ class SettingsDialogTest(unittest.TestCase):
         finally:
             runner.stop()
 
+    def test_vocabulary_tab(self):
+        s = Settings(asr_context="Vocabulary: QwenType")
+        runner = AsyncRunner()
+        try:
+            d = SettingsDialog(s, runner, "vocabulary")
+            self.assertIs(d.tabs.currentWidget(), d.vocabulary)
+            self.assertEqual(d.vocabulary.context.toPlainText(), "Vocabulary: QwenType")
+            d.vocabulary.context.setPlainText("Kubernetes\nQwenType\n张三\n")
+            d.vocabulary.corrections.setPlainText("库伯内提斯 -> Kubernetes\n配森")
+            d.tabs.setCurrentWidget(d.asr)
+            d._save()  # line 2 has no arrow
+            self.assertIs(d.tabs.currentWidget(), d.vocabulary)
+            self.assertIn("line 2", d.error.text())
+            self.assertEqual(s.asr_corrections, "")
+            d.vocabulary.corrections.setPlainText("# fixes\n库伯内提斯 -> Kubernetes\n配森 -> Python\n")
+            d._save()
+            self.assertEqual(d.result(), SettingsDialog.DialogCode.Accepted)
+        finally:
+            runner.stop()
+        self.assertEqual(s.asr_context, "Kubernetes\nQwenType\n张三")
+        self.assertEqual(s.asr_corrections, "# fixes\n库伯内提斯 -> Kubernetes\n配森 -> Python")
+
     def test_invalid_url_switches_to_its_tab(self):
         s = Settings()
         runner = AsyncRunner()
@@ -309,6 +331,13 @@ class TrayTest(unittest.TestCase):
         self.assertEqual(labels[-1], "Clear")
         tray.set_recent([], visible=False)
         self.assertFalse(tray.recent_menu.menuAction().isVisible())
+
+    def test_vocabulary_item_opens_its_tab(self):
+        tray = Tray(Settings(), False)
+        pages = []
+        tray.settings_requested.connect(pages.append)
+        next(a for a in tray.menu.actions() if a.text() == "Vocabulary…").trigger()
+        self.assertEqual(pages, ["vocabulary"])
 
 
 class FakeSession(AsrSession):
@@ -431,6 +460,26 @@ class ControllerTest(unittest.TestCase):
         session = self._record()
         session.events.error.emit("ASR server offline")
         self.assertIs(self.c.state, qmain.State.IDLE)
+
+    def test_corrections_apply_to_partial_and_final(self):
+        self.settings.asr_corrections = "库伯内提斯 -> Kubernetes\n嗯 ->"
+        session = self._record()
+        self.c._on_show_timer()
+        session.events.partial.emit("我用库伯内提斯")
+        self.assertEqual(self.c.capsule._text, "我用Kubernetes")
+        self.c._on_released()
+        with mock.patch.object(qmain, "inject_text") as inject:
+            session.events.final.emit("我用库伯内提斯部署", "Chinese")
+            self._wait_idle()
+        self.assertEqual(inject.call_args.args[0], "我用Kubernetes部署")
+        self.assertEqual(self.c._asr_text, "我用库伯内提斯部署")  # the review log keeps what was recognized
+
+        session = self._record()
+        self.c._on_released()
+        with mock.patch.object(qmain, "inject_text") as inject:
+            session.events.final.emit("嗯", "Chinese")  # nothing left after the corrections
+            self._wait_idle()
+        inject.assert_not_called()
 
     def test_failed_injection_copies_text(self):
         QGuiApplication.clipboard().setText("")

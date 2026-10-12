@@ -24,7 +24,7 @@ from PySide6.QtCore import QLockFile, QObject, QTimer, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
-from . import __version__, editlog, llm, win32
+from . import __version__, corrections, editlog, llm, win32
 from .aio import AsyncRunner
 from .asr import AsrBackend, AsrSession, Qwen3StreamingBackend
 from .audio import AudioCapture
@@ -389,6 +389,7 @@ class Controller(QObject):
     def _on_partial(self, text: str) -> None:
         if not self._is_current() or self.state not in (State.RECORDING, State.FINISHING):
             return
+        text = corrections.apply(text, self.settings.asr_corrections)
         if self._shown:
             self.ui.set_text(text)
         else:
@@ -402,7 +403,9 @@ class Controller(QObject):
         self._watchdog.stop()
         if self.state is not State.FINISHING:
             return
-        text = text.strip()
+        recognized = text.strip()
+        s = self.settings
+        text = corrections.apply(recognized, s.asr_corrections).strip()
         if not text:
             log.info("Empty transcript")
             self.ui.dismiss()
@@ -411,8 +414,7 @@ class Controller(QObject):
         if self._instruction:
             self._start_edit(text)
             return
-        self._asr_text, self._asr_language = text, language
-        s = self.settings
+        self._asr_text, self._asr_language = recognized, language  # the review log keeps what was recognized
         if s.llm_enabled and s.llm_configured:
             self.state = State.REFINING
             self.capsule.show_status("Refining…")

@@ -22,7 +22,11 @@ Remove:
 - Stutters and accidental repetitions of the same word or phrase.
 
 Also fix words that were clearly misrecognized when the context leaves no doubt about the intended \
-word. Adjust punctuation only where removing words leaves it broken.
+word. Speech recognition often garbles names, technical terms, product names and new words: it \
+writes them as similar-sounding common words or homophones, spells an English term in Chinese \
+characters, or splits or misspells it. Restore such a term in its usual spelling when the context \
+makes it evident or it is in the user's vocabulary. Adjust punctuation only where removing words \
+leaves it broken.
 
 Keep everything else as spoken:
 - Never rephrase, polish, summarize, translate, reorder or add anything.
@@ -54,6 +58,13 @@ def chat_url(base_url: str) -> str:
     return base if base.endswith("/chat/completions") else base + "/chat/completions"
 
 
+# Introduces the hotwords in the refinement request.
+VOCABULARY_HEADING = (
+    "User vocabulary (names and terms the user says; a similar-sounding word or phrase in the transcript "
+    "that fits one of them in context was most likely misrecognized, so use the vocabulary spelling)"
+)
+
+
 def build_user_message(text: str, selected_language: str, detected_language: str, vocabulary: str = "") -> str:
     selected = _LANGUAGE_NAMES.get(selected_language, selected_language) if selected_language else "auto-detect"
     lines = [
@@ -61,7 +72,7 @@ def build_user_message(text: str, selected_language: str, detected_language: str
         f"Language detected by the ASR server: {detected_language or 'unknown'}",
     ]
     if vocabulary.strip():
-        lines.append(f"User vocabulary (preferred spellings, use only where clearly meant): {vocabulary.strip()}")
+        lines.append(f"{VOCABULARY_HEADING}:\n{vocabulary.strip()}")
     lines.append(f"Transcript:\n{text}")
     return "\n".join(lines)
 
@@ -73,7 +84,7 @@ LENGTH_SLACK_CHARS = 6
 def build_edit_message(text: str, instruction: str, vocabulary: str = "") -> str:
     lines = []
     if vocabulary.strip():
-        lines.append(f"User vocabulary (preferred spellings): {vocabulary.strip()}")
+        lines.append(f"User vocabulary (preferred spellings):\n{vocabulary.strip()}")
     lines += [f"Text:\n{text}", "", f"Instruction:\n{instruction}"]
     return "\n".join(lines)
 

@@ -75,7 +75,7 @@ class Tray(QObject):
     hotkey_mode_changed = Signal(str)
     recent_selected = Signal(str)
     recent_cleared = Signal()
-    settings_requested = Signal(str)  # page to open: "asr", "llm" or "advanced"
+    settings_requested = Signal(str)  # page to open: "asr", "vocabulary", "llm" or "advanced"
     llm_toggled = Signal(bool)
     autostart_toggled = Signal(bool)
     menu_opened = Signal()
@@ -134,6 +134,7 @@ class Tray(QObject):
 
         self.menu.addSeparator()
         self.menu.addAction("Settings…", lambda: self.settings_requested.emit("asr"))
+        self.menu.addAction("Vocabulary…", lambda: self.settings_requested.emit("vocabulary"))
 
         llm_menu = self.menu.addMenu("LLM Refinement")
         self.llm_action = QAction("Enable", llm_menu, checkable=True)

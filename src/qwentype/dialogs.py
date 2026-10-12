@@ -1,4 +1,4 @@
-"""Settings dialog with three tabs: ASR server, LLM refinement and advanced options."""
+"""Settings dialog with four tabs: ASR server, vocabulary, LLM refinement and advanced options."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import llm
+from . import corrections, llm
 from .aio import AsyncRunner
 from .asr.qwen3 import TOKEN_REJECTED, fetch_status, is_local_url
 from .qtasync import run_async
@@ -68,14 +68,9 @@ class AsrServerPage(QWidget):
         self.token.setPlaceholderText("(none)")
         self.token.setClearButtonEnabled(True)  # an empty field removes the stored token
 
-        self.context = QLineEdit(settings.asr_context)
-        self.context.setPlaceholderText("e.g. Vocabulary: Kubernetes, QwenType, 张三")
-        self.context.setClearButtonEnabled(True)
-
         form = QFormLayout()
         form.addRow("WebSocket URL", url_row)
         form.addRow("API Token", self.token)
-        form.addRow("Hotwords", self.context)
 
         self.status = _status_label()
         self.test_button = QPushButton("Test")
@@ -90,8 +85,7 @@ class AsrServerPage(QWidget):
             _note(
                 "URL: ws://host:8907/transcribe-streaming, or wss://your-domain/transcribe-streaming "
                 "for a server behind HTTPS. API Token: the server's API_TOKEN (required by the CPU image), "
-                "encrypted with Windows DPAPI. Hotwords: short context that biases recognition toward "
-                "names and terms; keep it short, it is part of every decode."
+                "encrypted with Windows DPAPI. Hotwords and corrections are on the Vocabulary tab."
             )
         )
         layout.addWidget(self.status)
@@ -106,7 +100,6 @@ class AsrServerPage(QWidget):
     def apply(self, settings: Settings) -> None:
         settings.ws_url = self.url.text().strip()
         settings.asr_token = self.token.text().strip()
-        settings.asr_context = self.context.text().strip()
 
     def _test(self) -> None:
         error = self.validate()
@@ -136,6 +129,58 @@ class AsrServerPage(QWidget):
                 self.status.setText(f"ASR: {result}" + (" – token accepted" if accepted else "") + warning)
 
         run_async(self._runner, fetch_status(base, token), done)
+
+
+def _list_edit(text: str, placeholder: str) -> QPlainTextEdit:
+    edit = QPlainTextEdit(text)
+    edit.setTabChangesFocus(True)
+    edit.setPlaceholderText(placeholder)
+    edit.setMinimumHeight(110)
+    return edit
+
+
+class VocabularyPage(QWidget):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__()
+        self.context = _list_edit(settings.asr_context, "One term per line, e.g.\nKubernetes\nQwenType\n张三")
+        self.corrections = _list_edit(
+            settings.asr_corrections,
+            "One rule per line: wrong -> right, e.g.\n库伯内提斯 | 酷伯内特斯 -> Kubernetes\ncloud code -> Claude Code",
+        )
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Hotwords"))
+        layout.addWidget(self.context, 1)
+        layout.addWidget(
+            _note(
+                "Names, terms and new words you dictate: one per line, or a few sentences about your topic. "
+                "Sent to the ASR server with each recording, so it prefers these spellings (the server caches it, "
+                "so a longer list is fine; list words you actually say). LLM refinement also gets them as "
+                "preferred spellings."
+            )
+        )
+        layout.addSpacing(8)
+        layout.addWidget(QLabel("Corrections"))
+        layout.addWidget(self.corrections, 1)
+        layout.addWidget(
+            _note(
+                "For words still recognized wrong: wrong -> right, several wrong forms as a | b -> right, "
+                "# for comments. Case is ignored and Latin words only match as whole words. Applied to every "
+                "transcript (also the live text and voice-edit instructions) before LLM refinement. Also add "
+                "the right spelling to Hotwords."
+            )
+        )
+
+    def validate(self) -> str | None:
+        bad = corrections.invalid_lines(self.corrections.toPlainText())
+        if bad:
+            lines = ", ".join(str(n) for n in bad[:5]) + (" …" if len(bad) > 5 else "")
+            return f"Corrections, line {lines}: write each rule as wrong -> right."
+        return None
+
+    def apply(self, settings: Settings) -> None:
+        settings.asr_context = self.context.toPlainText().strip()
+        settings.asr_corrections = self.corrections.toPlainText().strip()
 
 
 def _prompt_edit(text: str, tip: str) -> QPlainTextEdit:
@@ -403,7 +448,7 @@ class AdvancedPage(QWidget):
 
 
 class SettingsDialog(QDialog):
-    PAGES = ("asr", "llm", "advanced")
+    PAGES = ("asr", "vocabulary", "llm", "advanced")
 
     def __init__(self, settings: Settings, runner: AsyncRunner, page: str = "asr") -> None:
         super().__init__(None)
@@ -412,10 +457,12 @@ class SettingsDialog(QDialog):
         self._settings = settings
 
         self.asr = AsrServerPage(settings, runner)
+        self.vocabulary = VocabularyPage(settings)
         self.llm = LlmPage(settings, runner)
         self.advanced = AdvancedPage(settings)
         self.tabs = QTabWidget()
         self.tabs.addTab(self.asr, "ASR Server")
+        self.tabs.addTab(self.vocabulary, "Vocabulary")
         self.tabs.addTab(self.llm, "LLM Refinement")
         self.tabs.addTab(self.advanced, "Advanced")
         self.tabs.setCurrentIndex(self.PAGES.index(page) if page in self.PAGES else 0)
@@ -438,7 +485,7 @@ class SettingsDialog(QDialog):
         layout.addLayout(buttons)
 
     def _save(self) -> None:
-        pages = (self.asr, self.llm, self.advanced)
+        pages = (self.asr, self.vocabulary, self.llm, self.advanced)
         for page in pages:
             error = page.validate()
             if error:

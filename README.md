@@ -24,13 +24,15 @@ into the focused app. Shortcuts that use Right Ctrl (Ctrl+C, …) keep working a
   the box is open. Voice edits need the LLM settings (see below), not the **LLM Refinement** toggle.
 - **Recent** in the tray menu lists the last 10 transcripts; click one to copy it. They are kept in memory only.
   If typing fails, the text is copied to the clipboard so it isn't lost.
+- **Vocabulary** for names, technical terms and new words: hotwords steer the recognizer toward your spellings, and
+  correction rules (`wrong -> right`) fix words it still gets wrong. See [Vocabulary](#vocabulary).
 
 - Default language: Auto-detect. QwenType sends no `language` parameter and the model detects the language of
   each utterance. To force one, pick it under **Language** in the tray menu (English, 简体中文, 繁體中文, 日本語,
   한국어); 简体中文 also handles mixed Chinese–English speech, with English words kept in Latin script.
 - Optional **LLM Refinement**: an OpenAI-compatible model tidies up the spoken text faithfully: it drops filler words,
-  stutters and accidental repetitions and fixes clearly misrecognized words, but keeps your wording. If it fails or
-  changes too much, the unrefined text is used.
+  stutters and accidental repetitions and fixes clearly misrecognized words, such as a garbled technical term, but
+  keeps your wording. If it fails or changes too much, the unrefined text is used.
 - Settings are stored in `%APPDATA%\QwenType\settings.json`, with the server token and the LLM API key encrypted by
   Windows DPAPI. The log is `%APPDATA%\QwenType\qwentype.log`.
 
@@ -130,10 +132,6 @@ Open **Settings…** in the tray menu; the **ASR Server** tab has:
 - **WebSocket URL**: default `ws://127.0.0.1:8907/transcribe-streaming`; use `wss://…` for a server behind HTTPS.
 - **API Token**: the server's `API_TOKEN`, sent as `Authorization: Bearer <token>` and stored encrypted with
   Windows DPAPI. Leave it empty if the server has no token.
-- **Hotwords**: optional context (the stream's [`context`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm#ws-transcribe-streaming)) that biases
-  recognition toward names and terms, e.g.
-  `Vocabulary: Kubernetes, QwenType, 张三`. Keep it short; it is part of every decode. It is also passed to LLM
-  refinement as preferred spellings.
 
 **Test** checks `GET /ready` and verifies the token against `GET /health` (`ws://` → `http://`, `wss://` →
 `https://`, same host and port), so a wrong token shows up before the first recording.
@@ -170,6 +168,35 @@ The **Advanced** tab has:
 (`max_record_seconds`, `ready_timeout_seconds`, `final_timeout_seconds`, `unicode_max_chars`, `clipboard_apps`,
 `history_size`, `copy_on_failure`, `capsule_blur`, `review_log`, `hotkey`, `hotkey_mode`); edit the file only while QwenType isn't
 running.
+
+## Vocabulary
+
+The **Vocabulary** tab (also **Vocabulary…** in the tray menu) helps with names, technical terms and new words that
+the model doesn't know or keeps getting wrong:
+
+- **Hotwords**: the names and terms you dictate, one per line, or a few sentences about your topic. They are sent as
+  the stream's [`context`](https://github.com/dreamyfishmt/fast-qwen-asr-inference-vllm/blob/main/docs/api.md#context),
+  so the model prefers these spellings, and LLM refinement and voice edits get them as your vocabulary. The server
+  caches the context between recordings, so a longer list is fine; list words you actually say.
+- **Corrections**: for words that are still recognized wrong, one rule per line:
+
+  ```text
+  # wrong -> right
+  库伯内提斯 | 酷伯内特斯 -> Kubernetes
+  cloud code -> Claude Code
+  ```
+
+  `=>` and `→` work too, `a | b -> right` covers several wrong forms, and an empty right side deletes the wrong form.
+  Case is ignored, a space also matches no space or several (`cloud code` matches "CloudCode"), and where a wrong
+  form starts or ends with a Latin letter or digit, it only matches whole words. All rules apply in one pass, longest
+  wrong form first, to the live text, the final transcript and voice-edit instructions, before LLM refinement. Add
+  the right spelling to **Hotwords** too, so the model gets it right more often in the first place.
+
+Other ways to improve accuracy: turn on **LLM Refinement** with a capable model (it knows many recent terms and gets
+your hotwords); use the GPU image (Qwen3-ASR-1.7B) rather than the CPU image (0.6B); on a CPU server, set
+`STREAM_FINAL_REUSE_PARTIAL=false`, so the final result is decoded from scratch instead of continuing an earlier
+partial result whose errors can survive (the final result then takes longer); and if auto-detect takes Chinese with
+English terms for another language, pick 简体中文 under **Language**.
 
 ## Run and build
 
